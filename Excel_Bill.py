@@ -1,116 +1,157 @@
-import pandas as pd
-from pypdf import PdfReader, PdfWriter
-from pypdf.generic import NameObject
 import streamlit as st
-import streamlit.components.v1 as components
-import io
-import base64
+import pandas as pd
+from docx import Document
+from io import BytesIO
+import copy
 
+# Fixed buyer information
+buyer_info = {
+    "buyer_name": "CÔNG TY TNHH MAI KA",
+    "buyer_tax_code": "3700769325",
+    "buyer_address": "Số 10, Đường Đồng Minh, Khu phố Bình Minh 1, Phường Dĩ An, Thành phố Dĩ An, Tỉnh Bình Dương, Việt Nam"
+}
 
-def fill_pdf_bytes(csv_bytes: bytes,
-                   pdf_bytes: bytes,
-                   row_index: int = 0) -> bytes:
-    """
-    Reads CSV and PDF bytes, fills the PDF form with values from the specified CSV row,
-    flattens the form, and returns filled PDF bytes.
-    """
-    df = pd.read_csv(io.BytesIO(csv_bytes))
-    if row_index < 0 or row_index >= len(df):
-        raise IndexError(f"Row index {row_index} out of bounds (0 to {len(df) - 1})")
-    data = df.iloc[row_index].fillna("").astype(str).to_dict()
+# Columns to select from Excel
+chosen_cols = [1, 8, 9, 10, 11, 12]
 
-    # Read PDF and fill form fields
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    writer = PdfWriter()
-    writer.clone_reader_document_root(reader)
+# State for DOCX cell handling
+prior_tc = None
+shift = 0
 
-    for page in reader.pages:
-        writer.add_page(page)
+def replace_text_in_paragraph(paragraph, replacements):
+    for key, value in replacements.items():
+        if key in paragraph.text:
+            for run in paragraph.runs:
+                if key in run.text:
+                    run.text = run.text.replace(key, value)
 
-    # Update form fields with data
-    for page in writer.pages:
-        writer.update_page_form_field_values(page, data)
+def replace_text_in_table(table, replacements):
+    for row in table.rows:
+        for cell in row.cells:
+            for para in cell.paragraphs:
+                replace_text_in_paragraph(para, replacements)
 
-    # FLATTEN THE FORM (critical addition)
-    for page in writer.pages:
-        if '/Annots' in page:
-            for annot in page['/Annots']:
-                writer_annot = annot.get_object()
-                writer_annot.update({
-                    NameObject("/Ff"): NameObject(1)  # Set field flag to ReadOnly
-                })
+def replace_text_in_doc(doc, replacements):
+    for para in doc.paragraphs:
+        replace_text_in_paragraph(para, replacements)
+    for table in doc.tables:
+        replace_text_in_table(table, replacements)
 
-    # Remove interactive form elements
-    if NameObject('/AcroForm') in writer._root_object:
-        del writer._root_object[NameObject('/AcroForm')]
+def set_cell_text(row, j, text):
+    global prior_tc, shift
+    cell = row.cells[j + shift]
+    this_tc = cell._tc
+    if this_tc is prior_tc:
+        shift = 1
+        cell = row.cells[j + shift]
+    for p in cell.paragraphs:
+        if p.runs:
+            p.runs[0].text = text
+            for run in p.runs[1:]:
+                run.text = ''
+        else:
+            p.add_run(text)
+    prior_tc = this_tc
 
-    # Write final PDF to buffer
-    out_buffer = io.BytesIO()
-    writer.write(out_buffer)
-    return out_buffer.getvalue()
+# Streamlit UI
+st.title("Excel to DOCX Invoice Generator with Row Selection")
+st.write("Upload an Excel file and a DOCX template. Select the rows you want to include before generating the invoice.")
 
+excel_file = st.file_uploader("Upload Excel File", type=["xls", "xlsx"])
+docx_template = st.file_uploader("Upload DOCX Template", type="docx")
 
-def display_pdf(pdf_bytes: bytes):
-    """
-    Embeds PDF bytes by creating a Blob URL and opening it in a new browser tab to avoid data-URI blocking in Chrome/Opera.
-    """
-    import base64
-    # Encode PDF and generate Blob URL client-side
-    b64 = base64.b64encode(pdf_bytes).decode('utf-8')
-    pdf_html = f"""
-    <script>
-    (function() {{
-        const base64 = "{b64}";
-        const binary = atob(base64);
-        const len = binary.length;
-        const bytes = new Uint8Array(len);
-        for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
-        const blob = new Blob([bytes], {{ type: 'application/pdf' }});
-        const url = URL.createObjectURL(blob);
-        // Open PDF in new tab
-        window.open(url, '_blank');
-        // Fallback: display link if pop-up blocked
-        const link = document.createElement('a');
-        link.href = url;
-        link.textContent = 'Click here to view the PDF';
-        link.target = '_blank';
-        document.body.appendChild(link);
-    }})();
-    </script>
-    """
-    components.html(pdf_html, height=100)  # small height for script/link display
+if excel_file and docx_template:
+    try:
+        # Read the Excel without header
+        df = pd.read_excel(excel_file, header=None)
+        # Extract only primary table rows: second column must be integer-like
+        primary_df = df[df.iloc[:, 1].apply(lambda x: str(x).isdigit())]
+        primary_df = primary_df.iloc[:, chosen_cols].reset_index(drop=True)
 
+        st.subheader("Primary Data Table Preview")
+        st.dataframe(primary_df)
 
-def main():
-    st.title("📝 Bill checker")
-    st.markdown("Upload a CSV and a PDF form template, then choose which row to check.")
-    csv_file = st.file_uploader("Upload CSV file", type=["csv"] )
-    pdf_file = st.file_uploader("Upload PDF template", type=["pdf"] )
+        # Let user pick rows by index
+        selected_indices = st.multiselect(
+            "Select rows to include",
+            options=primary_df.index.tolist(),
+            default=primary_df.index.tolist()
+        )
+        filtered_df = primary_df.loc[selected_indices]
 
-    if csv_file and pdf_file:
-        try:
-            df = pd.read_csv(csv_file)
-            st.success(f"Loaded CSV with {len(df)} rows and {len(df.columns)} columns.")
-            st.dataframe(df.head(), height=200)
-            row_index = st.number_input(
-                label="Select row index for form data",
-                min_value=0,
-                max_value=len(df) - 1,
-                value=0,
-                step=1
+        st.subheader("Rows to be Used")
+        st.dataframe(filtered_df)
+
+        if st.button("Generate DOCX"):
+            # Load DOCX template
+            doc = Document(docx_template)
+
+            # Replace buyer information
+            replacements = {
+                "{buyer_name}": buyer_info["buyer_name"],
+                "{buyer_tax_code}": buyer_info["buyer_tax_code"],
+                "{buyer_address}": buyer_info["buyer_address"],
+            }
+            replace_text_in_doc(doc, replacements)
+
+            # Populate the first table in the template
+            table = doc.tables[0]
+            example_tr = table.rows[2]._tr if len(table.rows) > 2 else None
+
+            # Fill or append rows
+            for i, row_data in enumerate(filtered_df.itertuples(index=False)):
+                if i + 2 < len(table.rows):
+                    row = table.rows[i + 2]
+                else:
+                    if example_tr:
+                        new_tr = copy.deepcopy(example_tr)
+                        table._tbl.append(new_tr)
+                        row = table.rows[-1]
+                    else:
+                        row = table.add_row()
+                for j, value in enumerate(row_data):
+                    set_cell_text(row, j, str(value))
+
+            # Clear any surplus rows beyond the used range
+            total_used = len(filtered_df) + 2
+            for r in range(total_used, len(table.rows)-4):
+                for cell in table.rows[r].cells:
+                    for p in cell.paragraphs:
+                        p.clear()
+
+            # Perform calculations
+            # Assume last chosen column is Amount
+            amounts = pd.to_numeric(filtered_df.iloc[:, -1], errors='coerce').fillna(0)
+            total_ex_vat = amounts.sum()
+            vat_rate = 0.05  # 5%
+            vat_amount = total_ex_vat * vat_rate
+            total_inc_vat = total_ex_vat + vat_amount
+
+            for r in range(len(table.rows)-4, len(table.rows)):
+                row = table.rows[r]
+                if r==len(table.rows)-4:
+                    set_cell_text(row, -2, f"{total_ex_vat:,.0f}")
+                if r==len(table.rows)-3:
+                    set_cell_text(row, -2, f"{vat_amount:,.0f}")
+                if r==len(table.rows)-2:
+                    set_cell_text(row, -2, f"{total_inc_vat:,.0f}")
+                if r==len(table.rows)-1:
+                    for cell in table.rows[r].cells:
+                        for p in cell.paragraphs:
+                            p.clear()
+
+            # Save to BytesIO and provide download
+            output = BytesIO()
+            doc.save(output)
+            output.seek(0)
+
+            st.download_button(
+                label="Download DOCX",
+                data=output,
+                file_name="invoice.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             )
-            if st.button("Generate and Display PDF"):
-                try:
-                    csv_file.seek(0)
-                    pdf_file.seek(0)
-                    filled_pdf = fill_pdf_bytes(csv_file.read(), pdf_file.read(), int(row_index))
-                    display_pdf(filled_pdf)
-                except Exception as e:
-                    st.error(f"Error filling PDF: {e}")
-        except Exception as e:
-            st.error(f"Failed to read CSV: {e}")
-    else:
-        st.info("Please upload both CSV and PDF files to continue.")
-
-if __name__ == "__main__":
-    main()
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
+else:
+    st.info("Please upload both an Excel file and a DOCX template to proceed.")
