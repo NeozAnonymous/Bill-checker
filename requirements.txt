@@ -1,2 +1,2 @@
-docx
-exceptions
+python-docx
+openpyxl
