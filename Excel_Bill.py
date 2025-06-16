@@ -115,6 +115,7 @@ if excel_file and docx_template:
         primary_df = primary_df.dropna(axis=1)
         primary_df.columns = range(len(primary_df.columns))
 
+        primary_df[7] = primary_df[7].astype(float).apply(lambda x: f"{x:.2f}")
         primary_df[8] = primary_df[8].apply(lambda x: f"{x:,}".replace(",", "."))
         primary_df[9] = primary_df[9].apply(lambda x: f"{x:,}".replace(",", "."))
 
