@@ -116,8 +116,12 @@ if excel_file and docx_template:
         primary_df.columns = range(len(primary_df.columns))
 
         primary_df[7] = primary_df[7].astype(float).apply(lambda x: f"{x:.2f}".replace(".", ","))
-        primary_df[8] = primary_df[8].apply(lambda x: f"{x:,}".replace(",", "."))
-        primary_df[9] = primary_df[9].apply(lambda x: f"{x:,}".replace(",", "."))
+        for col in [8, 9]:
+            primary_df[col] = (
+                primary_df[col]
+                .astype(float)  # ensure numeric
+                .map(lambda x: f"{x:,.0f}".replace(",", "."))
+            )
 
         st.subheader("Primary Data Table Preview")
         st.dataframe(primary_df)
