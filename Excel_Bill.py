@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from docx import Document
+import docx  # use python-docx
 from io import BytesIO
 import copy
 
@@ -64,7 +64,6 @@ if excel_file and docx_template:
     try:
         # Read the Excel without header
         df = pd.read_excel(excel_file, header=None)
-        # Extract only primary table rows: second column must be integer-like
         primary_df = df[df.iloc[:, 1].apply(lambda x: str(x).isdigit())]
         primary_df = primary_df.iloc[:, chosen_cols].reset_index(drop=True)
 
@@ -83,8 +82,8 @@ if excel_file and docx_template:
         st.dataframe(filtered_df)
 
         if st.button("Generate DOCX"):
-            # Load DOCX template
-            doc = Document(docx_template)
+            # Load DOCX template using python-docx
+            doc = docx.Document(docx_template)
 
             # Replace buyer information
             replacements = {
@@ -120,7 +119,6 @@ if excel_file and docx_template:
                         p.clear()
 
             # Perform calculations
-            # Assume last chosen column is Amount
             amounts = pd.to_numeric(filtered_df.iloc[:, -1], errors='coerce').fillna(0)
             total_ex_vat = amounts.sum()
             vat_rate = 0.05  # 5%
@@ -129,13 +127,13 @@ if excel_file and docx_template:
 
             for r in range(len(table.rows)-4, len(table.rows)):
                 row = table.rows[r]
-                if r==len(table.rows)-4:
+                if r == len(table.rows)-4:
                     set_cell_text(row, -2, f"{total_ex_vat:,.0f}")
-                if r==len(table.rows)-3:
+                if r == len(table.rows)-3:
                     set_cell_text(row, -2, f"{vat_amount:,.0f}")
-                if r==len(table.rows)-2:
+                if r == len(table.rows)-2:
                     set_cell_text(row, -2, f"{total_inc_vat:,.0f}")
-                if r==len(table.rows)-1:
+                if r == len(table.rows)-1:
                     for cell in table.rows[r].cells:
                         for p in cell.paragraphs:
                             p.clear()
@@ -155,3 +153,7 @@ if excel_file and docx_template:
         st.error(f"An error occurred: {e}")
 else:
     st.info("Please upload both an Excel file and a DOCX template to proceed.")
+
+# Note: ensure the app environment has python-docx installed and the conflicting 'docx' package uninstalled:
+# pip uninstall docx
+# pip install python-docx
