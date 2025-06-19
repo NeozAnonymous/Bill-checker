@@ -1,233 +1,258 @@
 import streamlit as st
-import pandas as pd
 import docx
+import pandas as pd
+import re
 from io import BytesIO
+import openpyxl
 import copy
-import zipfile
-from lxml import etree
 
-# Column mappings for the invoice table
-cols_mapping = {
-    "STT": 0,
-    "Mặt hàng": 1,
-    "ĐVT": 3,
-    "số Lượng": 4,
-    "Đơn giá  ": 5,
-    "Doanh số mua chưa có thuế": 6,
+excel_cols = [
+    'STT', 'Số hóa đơn', "Ngày, tháng, năm lập hóa đơn", "Tên người bán", "Mã số thuế người bán", "Mặt hàng",
+    "ĐVT", "số Lượng", "Đơn giá  ", "Doanh số mua chưa có thuế", "Thuế suất", "Thuế GTGT", "Ghi chú",
+]
+col_map = {
+    1: "STT",
+    2: "Ký hiệu mẫu hóa đơn",
+    3: "Ký hiệu hoá đơn",
+    4: "Số hoá đơn",
+    5: "Ngày, tháng, năm lập hóa đơn",
+    6: "Tên người bán",
+    7: "Mã số thuế người bán",
+    8: "Mặt hàng",
+    9: "ĐVT",
+    10: "số Lượng",
+    11: "Đơn giá",
+    12: "Doanh số mua chưa có thuế",
+    13: "Thuế suất",
+    14: "Thuế GTGT",
+    15: "Ghi chú"
 }
 
+def get_writable_cell(ws, row, column):
 
-def replace_text_in_paragraph(paragraph, replacements):
-    for key, value in replacements.items():
-        if key in paragraph.text:
-            if paragraph.text == key:
-                if paragraph.runs:
-                    paragraph.runs[0].text = value
-                    for run in paragraph.runs[1:]:
-                        run.text = ''
-                else:
-                    paragraph.text = value
-            for run in paragraph.runs:
-                if key in run.text:
-                    run.text = run.text.replace(key, value)
+    cell_coord = ws.cell(row=row, column=column).coordinate
+    for merged_range in ws.merged_cells.ranges:
+        if cell_coord in merged_range:
+            # Return the top-left cell of the merged range
+            return ws[merged_range.min_row][merged_range.min_col - 1]
+    # If not merged, return the original cell
+    return ws.cell(row=row, column=column)
 
+def extract_from_docx(file):
+    doc = docx.Document(file)
+    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip() != '']
 
-def replace_text_in_table(table, replacements):
-    for row in table.rows:
-        for cell in row.cells:
-            for para in cell.paragraphs:
-                replace_text_in_paragraph(para, replacements)
-
-
-def replace_text_in_doc(doc, replacements):
-    for para in doc.paragraphs:
-        replace_text_in_paragraph(para, replacements)
-    for table in doc.tables:
-        replace_text_in_table(table, replacements)
-
-
-def set_cell_text(row, j, text):
-    cell = row.cells[j]
-    for p in cell.paragraphs:
-        if p.runs:
-            p.runs[0].text = text
-            for run in p.runs[1:]:
-                run.text = ''
-        else:
-            p.add_run(text)
-
-
-def replace_text_in_textboxes_stream(input_bytes, replacements):
-    buffer_in = BytesIO(input_bytes)
-    buffer_out = BytesIO()
-    with zipfile.ZipFile(buffer_in) as zin:
-        with zipfile.ZipFile(buffer_out, 'w') as zout:
-            for item in zin.infolist():
-                data = zin.read(item.filename)
-                if item.filename == 'word/document.xml':
-                    tree = etree.fromstring(data)
-                    ns = {
-                        'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
-                        'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
-                        'wps': 'http://schemas.microsoft.com/office/word/2010/wordprocessingShape',
-                        'wp': 'http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing',
-                        'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-                    }
-                    for tb in tree.findall('.//w:txbxContent', ns):
-                        for t in tb.xpath('.//w:t', namespaces=ns):
-                            if t.text:
-                                for old, new in replacements.items():
-                                    if old in t.text:
-                                        t.text = t.text.replace(old, new)
-                    new_xml = etree.tostring(tree, xml_declaration=True, encoding='UTF-8', standalone='yes')
-                    zout.writestr(item, new_xml)
-                else:
-                    zout.writestr(item, data)
-    buffer_out.seek(0)
-    return buffer_out
-
-
-def load_and_process_excel(excel_file):
-    excel_data = pd.read_excel(excel_file, header=None)
-    invoice_items = excel_data[excel_data.iloc[:, 1].apply(lambda x: str(x).isdigit())]
-    col_names = excel_data.ffill().iloc[invoice_items.index.values[0] - 4]
-    invoice_items = invoice_items.reset_index(drop=True)
-    invoice_items.columns = col_names
-    invoice_items = invoice_items.dropna(axis=1)
-
-    if "số Lượng" in invoice_items.columns:
-        invoice_items["số Lượng"] = invoice_items["số Lượng"].astype(float).apply(
-            lambda x: f"{x:.2f}".replace(".", ","))
-    if "Đơn giá  " in invoice_items.columns:
-        invoice_items["Đơn giá  "] = invoice_items["Đơn giá  "].apply(lambda x: f"{x:,}".replace(",", "."))
-    if "Doanh số mua chưa có thuế" in invoice_items.columns:
-        invoice_items["Doanh số mua chưa có thuế"] = invoice_items["Doanh số mua chưa có thuế"].apply(
-            lambda x: f"{x:,}".replace(",", "."))
-
-    return invoice_items
-
-
-def prepare_replacements(invoice_items):
-    replacements = {}
-
-    if "Ngày, tháng, năm lập hóa đơn" in invoice_items.columns:
-        time = invoice_items["Ngày, tháng, năm lập hóa đơn"].iloc[0]
-        day = time.day
-        month = f"{time.month:02d}"
-        year = time.year
-        replacements[
-            "Ngày (Date) 22 tháng (month) 04 năm (year) 2025"] = f"Ngày (Date) {day} tháng (month) {month} năm (year) {year}"
-        replacements["22/04/2025"] = f"{day}/{month}/{year}"
+    # Find the index of invoice title
+    for i, p in enumerate(paragraphs):
+        if "HÓA ĐƠN GIÁ TRỊ GIA TĂNG" in p or "VAT INVOICE" in p:
+            idx = i
+            break
     else:
-        replacements["Ngày (Date) 22 tháng (month) 04 năm (year) 2025"] = ""
-        replacements["22/04/2025"] = ""
+        raise ValueError("Cannot find invoice title")
 
-    if "Số hoá đơn" in invoice_items.columns:
-        invoice_number = invoice_items["Số hoá đơn"].iloc[0]
-        replacements["00000017"] = f"{invoice_number:08d}"
-    else:
-        replacements["00000017"] = ""
+    # Extract seller name (first paragraph)
+    seller_name = paragraphs[0]
 
-    if "Mã số thuế người bán" in invoice_items.columns:
-        seller_tax_code = invoice_items["Mã số thuế người bán"].iloc[0]
-        replacements["0318012656"] = f"{int(seller_tax_code):010}"
-    else:
-        replacements["0318012656"] = ""
+    # Extract tax code
+    tax_code = None
+    for p in paragraphs[:idx]:
+        if "Mã số thuế" in p or "Tax code" in p:
+            tax_code = p.split(":")[-1].strip()
+            break
+    if tax_code is None:
+        tax_code = ''
 
-    vat_rates = pd.to_numeric(invoice_items["Thuế suất"], errors='coerce').fillna(0)
-    vat_rate = vat_rates.iloc[0]
-    replacements["5%"] = f"{vat_rate * 100:,.0f}%"
+    # Extract date, serial, and number
+    date = serial = number = None
+    for p in paragraphs[idx + 1:]:
+        if date is None:
+            match = re.search(r"Ngày(?:\s*\([^)]*\))?\s+\d{1,2}\s+tháng(?:\s*\([^)]*\))?\s+\d{1,2}\s+năm(?:\s*\([^)]*\))?\s+\d{4}", p)
+            if match:
+                date = match.group(0)
+        if serial is None and ("Ký hiệu" in p or "Serial" in p):
+            serial = p.split(":")[1].strip()
+        if number is None and ("Số" in p or "Invoice No." in p):
+            number = p.split(":")[1].strip()
+        if date and serial and number:
+            break
+    if date is None:
+        date = ''
+    if serial is None:
+        serial = ''
+    if number is None:
+        number = ''
 
-    return replacements
-
-
-def populate_document(doc, selected_items, replacements, cols_mapping):
-    replace_text_in_doc(doc, replacements)
-
+    # Extract first table
     table = doc.tables[0]
-    table_cols = [col for col in cols_mapping.keys() if col in selected_items.columns]
-    missing_table_cols = [cols_mapping[col] for col in cols_mapping.keys() if col not in selected_items.columns]
-    table_data = selected_items[table_cols].copy()
-    table_data["STT"] = range(1, len(table_data) + 1)
-    example_row = table.rows[2]._tr if len(table.rows) > 2 else None
-
-    for i, (_, row_data) in enumerate(table_data.iterrows()):
-        if i + 2 < len(table.rows):
-            row = table.rows[i + 2]
+    item_rows = []
+    for row in table.rows[2:]:
+        cells = row.cells
+        if cells[0].text.strip().isdigit():
+            cols_used = []
+            j = 0
+            prior_tc = None
+            for cell in cells:
+                this_tc = cell._tc
+                if this_tc is prior_tc:
+                    j += 1
+                    continue
+                cols_used.append(cells[j].text.strip())
+                j += 1
+                prior_tc = this_tc
+            item_rows.append(cols_used)
         else:
-            new_row = copy.deepcopy(example_row)
-            table._tbl.append(new_row)
-            row = table.rows[-1]
-        for col in row_data.index:
-            value = row_data[col]
-            col_index = cols_mapping[col]
-            set_cell_text(row, col_index, str(value))
+            break
 
-    for r in range(2, len(table.rows) - 4):
-        for j in missing_table_cols:
-            if j < len(table.rows[r].cells):
-                cell = table.rows[r].cells[j]
-                for p in cell.paragraphs:
-                    p.clear()
+    # Extract tax rate
+    tax_rate = None
+    for cell in table.rows[-3].cells:
+        match = re.search(r"\d{1,3}%", cell.text)
+        if match:
+            tax_rate = float(match.group(0).replace("%", "")) / 100
+            break
+    if tax_rate is None:
+        tax_rate = ''
 
-    total_rows = len(table_data) + 2
-    for r in range(total_rows, len(table.rows) - 4):
-        for cell in table.rows[r].cells:
-            for p in cell.paragraphs:
-                p.clear()
+    # Process item rows
+    data = []
+    for row in item_rows:
+        stt, ten_hang_hoa, don_vi_tinh, so_luong_str, don_gia_str, thanh_tien_str = row[:6]
 
-    amounts = pd.to_numeric(selected_items["Doanh số mua chưa có thuế"].str.replace('.', '', regex=False),
-                            errors='coerce').fillna(0)
-    vat_rates = pd.to_numeric(selected_items["Thuế suất"], errors='coerce').fillna(0)
-    vat_amounts = amounts * vat_rates
-    vat_total = vat_amounts.sum()
-    total_ex_vat = amounts.sum()
-    total_inc_vat = total_ex_vat + vat_total
+        # Parse quantities and prices
+        so_luong = int(so_luong_str.replace('.', '').split(',')[0]) if ',' in so_luong_str else int(so_luong_str.replace('.', ''))
+        don_gia = int(don_gia_str.replace('.', ''))
+        thanh_tien = int(thanh_tien_str.replace('.', ''))
+        thue_gtgt = thanh_tien * tax_rate
 
-    for idx, value in enumerate([total_ex_vat, vat_total, total_inc_vat]):
-        row = table.rows[len(table.rows) - 4 + idx]
-        set_cell_text(row, -1, f"{value:,.0f}".replace(",", "."))
-    set_cell_text(table.rows[len(table.rows) - 1], -1, "")
+        data.append({
+            'STT': stt,
+            'Tên người bán': seller_name,
+            'Mã số thuế người bán': tax_code,
+            'Mặt hàng': ten_hang_hoa,
+            'ĐVT': don_vi_tinh,
+            'số Lượng': so_luong,
+            'Đơn giá': don_gia,
+            'Doanh số mua chưa có thuế': thanh_tien,
+            'Thuế suất': tax_rate,
+            'Thuế GTGT': thue_gtgt,
+            'Ghi chú': '',
+            'Ký hiệu mẫu hóa đơn': '',
+            'Ký hiệu hoá đơn': serial,
+            'Số hoá đơn': number,
+            'Ngày, tháng, năm lập hóa đơn': date
+        })
+    return data
 
+def process_files(docx_files, excel_file):
+    all_data = []
+    for docx_file in docx_files:
+        all_data.extend(extract_from_docx(docx_file))
 
-# Streamlit UI
-st.title("Excel to DOCX Invoice Generator with Textbox Support")
-st.write("Upload an Excel file and a DOCX template. Select rows and generate the invoice, including textboxes.")
+    new_df = pd.DataFrame(all_data)
+    st.write("### Extracted Data from DOCX Files")
+    st.dataframe(new_df)
 
-excel_file = st.file_uploader("Upload Excel File", type=["xls", "xlsx"])
-docx_template = st.file_uploader("Upload DOCX Template", type="docx")
+    # Load workbook with openpyxl
+    wb = openpyxl.load_workbook(excel_file)
+    ws = wb.active
 
-if excel_file and docx_template:
-    try:
-        invoice_items = load_and_process_excel(excel_file)
-        st.subheader("Primary Data Table Preview")
-        st.dataframe(invoice_items)
+    # Find insert_idx
+    for row_idx, row in enumerate(ws.iter_rows(min_row=1, values_only=True), start=1):
+        val = row[1]  # column B
+        if val is not None and str(val).strip().isdigit():
+            insert_idx = row_idx
+            break
+    else:
+        raise ValueError("Cannot find starting row")
 
-        selected_indices = st.multiselect(
-            "Select rows to include",
-            options=invoice_items.index.tolist(),
-            default=invoice_items.index.tolist()
-        )
-        selected_items = invoice_items.iloc[selected_indices]
-        st.subheader("Rows to be Used")
-        st.dataframe(selected_items)
+    # Store styles from the first data row (row insert_idx) for columns 1 to 16
+    # Before applying styles, store them with copy()
+    column_styles = []
+    for col in range(1, 17):  # Adjust range as per your columns
+        source_cell = ws.cell(row=insert_idx, column=col)
+        column_styles.append({
+            'font': copy.copy(source_cell.font),
+            'border': copy.copy(source_cell.border),
+            'fill': copy.copy(source_cell.fill),
+            'number_format': copy.copy(source_cell.number_format),
+            'protection': copy.copy(source_cell.protection),
+            'alignment': copy.copy(source_cell.alignment)
+        })
 
-        if st.button("Generate DOCX"):
-            template_bytes = docx_template.read()
-            replacements = prepare_replacements(invoice_items)
-            updated_bytes = replace_text_in_textboxes_stream(template_bytes, replacements)
-            doc = docx.Document(updated_bytes)
-            populate_document(doc, selected_items, replacements, cols_mapping)
-            output = BytesIO()
-            doc.save(output)
-            output.seek(0)
+    # Find end_idx
+    end_idx = insert_idx
+    while True:
+        val_b = ws.cell(row=end_idx, column=2).value
+        if not (isinstance(val_b, int) or val_b is None):
+            break
+        end_idx += 1
+        if end_idx > ws.max_row:
+            break
+
+    # Delete existing data rows
+    num_delete = end_idx - insert_idx
+    if num_delete > 0:
+        ws.delete_rows(insert_idx, amount=num_delete)
+
+    # Insert new rows
+    num_new_rows = len(all_data)
+    ws.insert_rows(insert_idx, amount=num_new_rows)
+
+    # Set values and styles for new rows
+    for i, item in enumerate(all_data):
+        row_idx = insert_idx + i
+        row = ['']
+        for key in range(1, 16):
+            col_name = col_map[key]
+            value = item.get(col_name, '')
+            row.append(value)
+        for j, value in enumerate(row):
+            col = j + 1  # Columns 1 to 16
+            target_cell = get_writable_cell(ws, row_idx, col)
+            style = column_styles[j]
+            target_cell.font = style['font']
+            target_cell.border = style['border']
+            target_cell.fill = style['fill']
+            target_cell.number_format = style['number_format']
+            target_cell.protection = style['protection']
+            target_cell.alignment = style['alignment']
+            target_cell.value = value
+
+    # Update summary rows
+    row_idx = insert_idx + len(all_data)
+    total_doanh_so = sum(item.get('Doanh số mua chưa có thuế', 0) for item in all_data)
+    total_thue_gtgt = sum(item.get('Thuế GTGT', 0) for item in all_data)
+    # Use get_writable_cell for robustness
+    get_writable_cell(ws, row_idx, 13).value = total_doanh_so
+    get_writable_cell(ws, row_idx, 15).value = total_thue_gtgt
+
+    row_idx += 5
+    get_writable_cell(ws, row_idx, 8).value = total_doanh_so
+
+    row_idx += 1
+    get_writable_cell(ws, row_idx, 8).value = total_thue_gtgt
+
+    # Save to BytesIO
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
+
+def main():
+    st.title("Invoice Data Processor")
+    docx_files = st.file_uploader("Upload DOCX Files", type="docx", accept_multiple_files=True)
+    excel_file = st.file_uploader("Upload Excel File", type="xlsx", accept_multiple_files=False)
+
+    if docx_files and excel_file:
+        if st.button("Process Files"):
+            result_excel = process_files(docx_files, excel_file)
+            st.success("Processing complete!")
             st.download_button(
-                label="Download Updated Invoice",
-                data=output,
-                file_name="invoice.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                label="Download Result Excel",
+                data=result_excel,
+                file_name="result.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-    except Exception as e:
-        st.error(f"An error occurred: {e}")
-else:
-    st.info("Please upload both an Excel file and a DOCX template to proceed.")
+
+if __name__ == "__main__":
+    main()
