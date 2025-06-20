@@ -5,6 +5,7 @@ import re
 from io import BytesIO
 import openpyxl
 import copy
+from datetime import datetime
 
 excel_cols = [
     'STT', 'Số hóa đơn', "Ngày, tháng, năm lập hóa đơn", "Tên người bán", "Mã số thuế người bán", "Mặt hàng",
@@ -44,20 +45,20 @@ def extract_from_docx(file):
 
     # Find the index of invoice title
     for i, p in enumerate(paragraphs):
-        if "HÓA ĐƠN GIÁ TRỊ GIA TĂNG" in p or "VAT INVOICE" in p:
+        if "HÓA ĐƠN GIÁ TRỊ GIA TĂNG" in p or "VAT INVOICE" in p or p in "HÓA ĐƠN GIÁ TRỊ GIA TĂNG" or p in "VAT INVOICE":
             idx = i
             break
     else:
         raise ValueError("Cannot find invoice title")
 
     # Extract seller name (first paragraph)
-    seller_name = paragraphs[0]
+    seller_name = ""
 
     # Extract tax code
     tax_code = None
-    for p in paragraphs[:idx]:
+    for p in paragraphs[:]:
         if "Mã số thuế" in p or "Tax code" in p:
-            tax_code = p.split(":")[-1].strip()
+            tax_code = p.split(":")[-1].strip().replace("-", "").replace(" ", "")
             break
     if tax_code is None:
         tax_code = ''
@@ -66,9 +67,12 @@ def extract_from_docx(file):
     date = serial = number = None
     for p in paragraphs[idx + 1:]:
         if date is None:
-            match = re.search(r"Ngày(?:\s*\([^)]*\))?\s+\d{1,2}\s+tháng(?:\s*\([^)]*\))?\s+\d{1,2}\s+năm(?:\s*\([^)]*\))?\s+\d{4}", p)
+            match = re.search(r"Ngày(?:\s*\([^)]*\))?\s+(\d{1,2})\s+tháng(?:\s*\([^)]*\))?\s+(\d{1,2})\s+năm(?:\s*\([^)]*\))?\s+(\d{4})", p)
             if match:
-                date = match.group(0)
+                day = match.group(1)
+                month = match.group(2)
+                year = match.group(3)
+                date = f"{day}/{month}/{year}"
         if serial is None and ("Ký hiệu" in p or "Serial" in p):
             serial = p.split(":")[1].strip()
         if number is None and ("Số" in p or "Invoice No." in p):
@@ -85,7 +89,14 @@ def extract_from_docx(file):
     # Extract first table
     table = doc.tables[0]
     item_rows = []
-    for row in table.rows[2:]:
+    start_idx = 1
+    row = table.rows[2]
+    cells = row.cells
+    if cells[0].text.strip()=="1":
+        start_idx = 2
+    else:
+        start_idx = 1
+    for row in table.rows[start_idx:]:
         cells = row.cells
         if cells[0].text.strip().isdigit():
             cols_used = []
@@ -120,8 +131,8 @@ def extract_from_docx(file):
 
         # Parse quantities and prices
         so_luong = int(so_luong_str.replace('.', '').split(',')[0]) if ',' in so_luong_str else int(so_luong_str.replace('.', ''))
-        don_gia = int(don_gia_str.replace('.', ''))
-        thanh_tien = int(thanh_tien_str.replace('.', ''))
+        don_gia = int(don_gia_str.replace('.', '').replace(',', ''))
+        thanh_tien = int(thanh_tien_str.replace('.', '').replace(',', ''))
         thue_gtgt = thanh_tien * tax_rate
 
         data.append({
@@ -147,6 +158,14 @@ def process_files(docx_files, excel_file):
     all_data = []
     for docx_file in docx_files:
         all_data.extend(extract_from_docx(docx_file))
+
+    # Sort by invoice date
+    all_data.sort(key=lambda x: datetime.strptime(x['Ngày, tháng, năm lập hóa đơn'], "%d/%m/%Y"))
+
+    c = 1
+    for i in range(len(all_data)):
+        all_data[i]["STT"] = c
+        c+=1
 
     new_df = pd.DataFrame(all_data)
     st.write("### Extracted Data from DOCX Files")
@@ -195,6 +214,8 @@ def process_files(docx_files, excel_file):
         ws.delete_rows(insert_idx, amount=num_delete)
 
     # Insert new rows
+    for cell in ws[insert_idx]:
+        print(cell.value)
     num_new_rows = len(all_data)
     ws.insert_rows(insert_idx, amount=num_new_rows)
 
