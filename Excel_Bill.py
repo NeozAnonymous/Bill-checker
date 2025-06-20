@@ -214,8 +214,6 @@ def process_files(docx_files, excel_file):
         ws.delete_rows(insert_idx, amount=num_delete)
 
     # Insert new rows
-    for cell in ws[insert_idx]:
-        print(cell.value)
     num_new_rows = len(all_data)
     ws.insert_rows(insert_idx, amount=num_new_rows)
 
