@@ -1,277 +1,428 @@
 import streamlit as st
-import docx
 import pandas as pd
 import re
 from io import BytesIO
 import openpyxl
 import copy
-from datetime import datetime
+import fitz
 
-excel_cols = [
-    'STT', 'Số hóa đơn', "Ngày, tháng, năm lập hóa đơn", "Tên người bán", "Mã số thuế người bán", "Mặt hàng",
-    "ĐVT", "số Lượng", "Đơn giá  ", "Doanh số mua chưa có thuế", "Thuế suất", "Thuế GTGT", "Ghi chú",
+EXCEL_COLUMNS = [
+    "STT", "NGÀY CHỨNG TỪ", "SỐ CHỨNG TỪ", "NGÀY HÓA ĐƠN", "SỐ HÓA ĐƠN",
+    "TÊN MẶT HÀNG", "SỐ LƯỢNG", "ĐƠN VỊ", "GIÁ", "TỶ GIÁ", "THÀNH TIỀN NGUYÊN TỆ",
+    "THÀNHTIỀN(VND)", "NỢ", "CÓ", "HẠNG MỤC", "TÊN", "Mã số thuế người bán", "GHI CHÚ"
 ]
-col_map = {
-    1: "STT",
-    2: "Ký hiệu mẫu hóa đơn",
-    3: "Ký hiệu hoá đơn",
-    4: "Số hoá đơn",
-    5: "Ngày, tháng, năm lập hóa đơn",
-    6: "Tên người bán",
-    7: "Mã số thuế người bán",
-    8: "Mặt hàng",
-    9: "ĐVT",
-    10: "số Lượng",
-    11: "Đơn giá",
-    12: "Doanh số mua chưa có thuế",
-    13: "Thuế suất",
-    14: "Thuế GTGT",
-    15: "Ghi chú"
-}
 
-def get_writable_cell(ws, row, column):
 
-    cell_coord = ws.cell(row=row, column=column).coordinate
+def get_col_index(column_names, target_col):
+    """Return 1-based index of the column matching target_col or None if not found."""
+    for idx, col_name in enumerate(column_names):
+        if col_name == target_col:
+            return idx + 1
+    return None
+
+
+def get_cell_to_write(ws, row, col):
+    """
+    For merged cells, return the top-left cell of the merged region covering (row, col);
+    otherwise, return the cell itself.
+    """
+    cell_coord = ws.cell(row=row, column=col).coordinate
     for merged_range in ws.merged_cells.ranges:
         if cell_coord in merged_range:
-            # Return the top-left cell of the merged range
-            return ws[merged_range.min_row][merged_range.min_col - 1]
-    # If not merged, return the original cell
-    return ws.cell(row=row, column=column)
+            top_left_cell = ws.cell(row=merged_range.min_row, column=merged_range.min_col)
+            return top_left_cell
+    return ws.cell(row=row, column=col)
 
-def extract_from_docx(file):
-    doc = docx.Document(file)
-    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip() != '']
 
-    # Find the index of invoice title
-    for i, p in enumerate(paragraphs):
-        if "HÓA ĐƠN GIÁ TRỊ GIA TĂNG" in p or "VAT INVOICE" in p or p in "HÓA ĐƠN GIÁ TRỊ GIA TĂNG" or p in "VAT INVOICE":
-            idx = i
-            break
-    else:
-        raise ValueError("Cannot find invoice title")
+def extract_pdf_text(file):
+    """Extract non-empty text lines from all pages of a PDF file stream."""
+    doc = fitz.open(stream=file, filetype="pdf")
+    lines = []
+    for page_num in range(doc.page_count):
+        page_text = doc.load_page(page_num).get_text("text")
+        page_lines = [line.strip() for line in page_text.splitlines() if line.strip()]
+        lines.extend(page_lines)
+    doc.close()
+    return lines
 
-    # Extract seller name (first paragraph)
-    seller_name = ""
 
-    # Extract tax code
-    tax_code = None
-    for p in paragraphs[:]:
-        if "Mã số thuế" in p or "Tax code" in p:
-            tax_code = p.split(":")[-1].strip().replace("-", "").replace(" ", "")
-            break
-    if tax_code is None:
-        tax_code = ''
+def extract_seller_info(lines):
+    """
+    Extract seller name and tax code from lines.
+    Seller name is the line containing 'CÔNG TY' and tax code is a 10-digit number possibly with dashes/spaces.
+    """
+    def find_seller_line_idx(lines):
+        candidates = []
+        for i, line in enumerate(lines):
+            if "CÔNG TY" in line:
+                seller = line.split(":", 1)[-1].strip()
+                candidates.append((seller, i))
+        if not candidates:
+            return None
+        # choose longest seller name (likely more complete)
+        seller_name, idx = max(candidates, key=lambda c: len(c[0].split()))
+        return idx
 
-    # Extract date, serial, and number
-    date = serial = number = None
-    for p in paragraphs[idx + 1:]:
-        if date is None:
-            match = re.search(r"Ngày(?:\s*\([^)]*\))?\s+(\d{1,2})\s+tháng(?:\s*\([^)]*\))?\s+(\d{1,2})\s+năm(?:\s*\([^)]*\))?\s+(\d{4})", p)
-            if match:
-                day = match.group(1)
-                month = match.group(2)
-                year = match.group(3)
-                date = f"{day}/{month}/{year}"
-        if serial is None and ("Ký hiệu" in p or "Serial" in p):
-            serial = p.split(":")[1].strip()
-        if number is None and ("Số" in p or "Invoice No." in p):
-            number = p.split(":")[1].strip()
-        if date and serial and number:
-            break
-    if date is None:
-        date = ''
-    if serial is None:
-        serial = ''
-    if number is None:
-        number = ''
+    start_idx = find_seller_line_idx(lines)
+    if start_idx is None:
+        return "", ""
 
-    # Extract first table
-    table = doc.tables[0]
-    item_rows = []
-    start_idx = 1
-    row = table.rows[2]
-    cells = row.cells
-    if cells[0].text.strip()=="1":
-        start_idx = 2
-    else:
-        start_idx = 1
-    for row in table.rows[start_idx:]:
-        cells = row.cells
-        if cells[0].text.strip().isdigit():
-            cols_used = []
-            j = 0
-            prior_tc = None
-            for cell in cells:
-                this_tc = cell._tc
-                if this_tc is prior_tc:
-                    j += 1
-                    continue
-                cols_used.append(cells[j].text.strip())
-                j += 1
-                prior_tc = this_tc
-            item_rows.append(cols_used)
-        else:
-            break
+    seller_name = lines[start_idx].split(":", 1)[-1].strip()
+    tax_code = ""
+    tax_code_pattern = re.compile(r'((?:\d\s*){10}(?:-\s*(?:\d\s*)+)?)')
 
-    # Extract tax rate
-    tax_rate = None
-    for cell in table.rows[-3].cells:
-        match = re.search(r"\d{1,3}%", cell.text)
+    for line in lines:
+        match = tax_code_pattern.search(line)
         if match:
-            tax_rate = float(match.group(0).replace("%", "")) / 100
+            tax_code = match.group(1).replace(" ", "").replace("-", "")
             break
+
+    return seller_name, tax_code
+
+
+def extract_invoice_number(lines):
+    """
+    Extract invoice number by searching lines with 'Số' pattern (case insensitive).
+    This method considers lines after the matched line for numeric-only values.
+    """
+    number = ""
+    for i, line in enumerate(lines):
+
+        if re.search(r"Số(?:(?:\s|\([^)]*\))*)?:", line, re.IGNORECASE):
+            parts = line.split(":", 1)
+            if len(parts) > 1:
+                value = parts[1].strip()
+                if value.isdigit():
+                    number = value
+                    break
+            # look at following lines if current line does not contain a digit-only number
+            for next_line in lines[i + 1:]:
+                if next_line.strip().isdigit():
+                    number = next_line.strip()
+                    break
+            if number:
+                break
+
+    return number
+
+
+def extract_tables_from_pdf(file):
+    """
+    Attempt to extract tables from first page of PDF using fitz's find_tables.
+    Returns extracted table data rows starting from header row identified by 'STT'.
+    """
+    doc = fitz.open(stream=file.read(), filetype="pdf")
+    page = doc[0]
+    tables = page.find_tables()
+
+    if not tables or not tables.tables:
+        doc.close()
+        return None
+
+    table = tables[0].extract()
+    doc.close()
+
+    # Find header row containing 'STT'
+    start_idx = 0
+    for i, row in enumerate(table):
+        if row and row[0] and "STT" in str(row[0]):
+            start_idx = i
+            break
+
+    header_row = table[start_idx]
+    chosen_cols_idx = [i for i, cell in enumerate(header_row) if cell]
+
+    extracted_rows = []
+    for row in table[start_idx:]:
+        if not (row and row[0]):
+            break
+        filtered_row = [row[i] for i in chosen_cols_idx]
+        extracted_rows.append(filtered_row)
+
+    return extracted_rows
+
+
+def parse_int(value_str):
+    """Safely parse integer from string after removing dots, commas, spaces; return None on error."""
+    try:
+        normalized = value_str.replace('.', '').replace(',', '').replace(' ', '')
+        return int(normalized)
+    except Exception:
+        return ''
+
+
+filename = None
+def extract_invoice_data_from_pdf(pdf_file_stream):
+    """
+    Main extraction function - fetches seller info, invoice number, dates,
+    tax rate and item table rows from the given PDF stream.
+    Returns list of dicts representing the invoice items.
+    """
+    # Reset stream pointer before multiple reads
+    pdf_file_stream.seek(0)
+
+    global filename
+    filename = pdf_file_stream.name
+
+    lines = extract_pdf_text(pdf_file_stream)
+
+    # Reset stream to extract tables separately
+    pdf_file_stream.seek(0)
+    item_table = extract_tables_from_pdf(pdf_file_stream)
+
+    if not item_table or len(item_table) == 0:
+        raise ValueError("Cannot find table in the PDF")
+
+    seller_name, tax_code = extract_seller_info(lines)
+    invoice_number = extract_invoice_number(lines)
+
+    # Determine starting index for item rows
+    start_idx = 2 if len(item_table) > 1 and str(item_table[1][0]).strip() == "1" else 1
+
+    item_rows = []
+    for row in item_table[start_idx:]:
+        if row and row[0] and str(row[0]).strip().isdigit():
+            cleaned = [str(cell).strip() if cell else '' for cell in row]
+            item_rows.append(cleaned)
+        else:
+            if len(item_rows) > 0:
+                break
+
+    # Extract invoice date from lines
+    date_pattern = re.compile(r'(\d{2}\s*[-/]\s*\d{2}\s*[-/]\s*\d{4})')
+    invoice_date = ""
+    for line in lines:
+        match = date_pattern.search(line)
+        if match:
+            invoice_date = match.group(1).replace(" ", "").replace("-", "/")
+            break
+
+    # Extract tax rate (e.g. '10%') from lines
+    tax_rate_pattern = re.compile(r"(?<!\d)(\d{1,3})\s*%(?!\d)")
+    tax_rate = None
+    for line in lines:
+        match = tax_rate_pattern.search(line)
+        if match:
+            tax_rate = float(match.group(1)) / 100
+            break
+
     if tax_rate is None:
-        tax_rate = ''
+        st.warning(f"Cannot find tax rate for {pdf_file_stream.name}, set tax_rate to 0")
+        tax_rate = 0
 
-    # Process item rows
-    data = []
+
+    pdf_col_names = item_table[0]
+    pdf_col_names = list(
+        map(
+            lambda x: " ".join(x.split("\n")[:-1]).strip() if len(x.split("\n")) > 1 else x,
+            pdf_col_names
+        )
+    )
+
+    if len(pdf_col_names) > 6:
+
+        cols_map = {}
+        if filename not in mapping_dict.keys():
+            raise ValueError(f"File {filename} requires col_mapping but not found")
+        for i, key in enumerate(["stt", "name", "unit", "qty", "price", "amount"]):
+            cols_map[key] = mapping_dict[filename][i]
+
+    else:
+        cols_map = {"stt": 0, "name": 1, "unit": 2, "qty": 3, "price": 4, "amount": 5}
+
+    extracted_data = []
     for row in item_rows:
-        stt, ten_hang_hoa, don_vi_tinh, so_luong_str, don_gia_str, thanh_tien_str = row[:6]
+        # use the mapped indices instead of fixed positions
+        try:
+            stt        = str(row[cols_map["stt"]]).strip()
+            item_name  = str(row[cols_map["name"]]).strip()
+            unit       = str(row[cols_map["unit"]]).strip().lower()
+            quantity   = parse_int(str(row[cols_map["qty"]]))
+            unit_price = parse_int(str(row[cols_map["price"]]))
+            amount     = parse_int(str(row[cols_map["amount"]]))
+        except (IndexError, KeyError):
+            # if mapping is invalid or row too short, skip
+            continue
 
-        # Parse quantities and prices
-        so_luong = int(so_luong_str.replace('.', '').split(',')[0]) if ',' in so_luong_str else int(so_luong_str.replace('.', ''))
-        don_gia = int(don_gia_str.replace('.', '').replace(',', ''))
-        thanh_tien = int(thanh_tien_str.replace('.', '').replace(',', ''))
-        thue_gtgt = thanh_tien * tax_rate
+        if not all(var != "" for var in [amount]):
+            raise ValueError("Missing thanh_tien")
 
-        data.append({
-            'STT': stt,
-            'Tên người bán': seller_name,
-            'Mã số thuế người bán': tax_code,
-            'Mặt hàng': ten_hang_hoa,
-            'ĐVT': don_vi_tinh,
-            'số Lượng': so_luong,
-            'Đơn giá': don_gia,
-            'Doanh số mua chưa có thuế': thanh_tien,
-            'Thuế suất': tax_rate,
-            'Thuế GTGT': thue_gtgt,
-            'Ghi chú': '',
-            'Ký hiệu mẫu hóa đơn': '',
-            'Ký hiệu hoá đơn': serial,
-            'Số hoá đơn': number,
-            'Ngày, tháng, năm lập hóa đơn': date
+        exchange_rate = 1  # currently hard-coded
+
+        extracted_data.append({
+            "STT": stt,
+            "TÊN": seller_name,
+            "Mã số thuế người bán": tax_code,
+            "TÊN MẶT HÀNG": item_name,
+            "ĐƠN VỊ": unit,
+            "SỐ LƯỢNG": quantity,
+            "GIÁ": unit_price,
+            "TỶ GIÁ": exchange_rate,
+            "THÀNH TIỀN NGUYÊN TỆ": amount,
+            "THÀNHTIỀN(VND)": amount * exchange_rate,
+            "Ghi chú": "",
+            "Ký hiệu mẫu hóa đơn": "",
+            "SỐ HÓA ĐƠN": invoice_number,
+            "NGÀY HÓA ĐƠN": invoice_date,
+            "NGÀY CHỨNG TỪ": invoice_date,
+            "Thuế GTGT": amount * tax_rate
         })
-    return data
 
-def process_files(docx_files, excel_file):
-    all_data = []
-    for docx_file in docx_files:
-        all_data.extend(extract_from_docx(docx_file))
+    if len(extracted_data) == 0:
+        raise ValueError("Cannot find table in the PDF")
+    return extracted_data
 
-    # Sort by invoice date
-    all_data.sort(key=lambda x: datetime.strptime(x['Ngày, tháng, năm lập hóa đơn'], "%d/%m/%Y"))
 
-    c = 1
-    for i in range(len(all_data)):
-        all_data[i]["STT"] = c
-        c+=1
+def update_excel_with_data(pdf_files, excel_template_stream):
+    """
+    Processes multiple PDF files to extract invoice data, then updates the
+    provided Excel template with the extracted rows preserving styles.
+    Returns a BytesIO stream containing the updated Excel workbook.
+    """
+    all_items = []
+    for pdf_file in pdf_files:
+        try:
+            data = extract_invoice_data_from_pdf(pdf_file)
+            all_items.extend(data)
+        except Exception as e:
+            st.error(f"Error processing {pdf_file.name}: {str(e)}")
 
-    new_df = pd.DataFrame(all_data)
-    st.write("### Extracted Data from DOCX Files")
-    st.dataframe(new_df)
+    # Renumber STT sequentially
+    for idx, item in enumerate(all_items, start=1):
+        item["STT"] = idx
 
-    # Load workbook with openpyxl
-    wb = openpyxl.load_workbook(excel_file)
+    # Show extracted data in Streamlit app for preview
+    df_preview = pd.DataFrame(all_items)
+    st.write("### Extracted Data from PDF Files")
+    st.dataframe(df_preview)
+
+    # Load Excel workbook
+    wb = openpyxl.load_workbook(excel_template_stream)
     ws = wb.active
 
-    # Find insert_idx
-    for row_idx, row in enumerate(ws.iter_rows(min_row=1, values_only=True), start=1):
-        val = row[1]  # column B
-        if val is not None and str(val).strip().isdigit():
-            insert_idx = row_idx
+    # Find Excel insert start row by detecting first row with numeric cell value in any column
+    insert_row = None
+    for r_idx, row_cells in enumerate(ws.iter_rows(values_only=True), start=1):
+        if any(val is not None and str(val).strip().isdigit() for val in row_cells):
+            insert_row = r_idx
             break
-    else:
-        raise ValueError("Cannot find starting row")
+    if insert_row is None:
+        raise ValueError("Cannot find starting row to insert data in Excel sheet.")
 
-    # Store styles from the first data row (row insert_idx) for columns 1 to 16
-    # Before applying styles, store them with copy()
-    column_styles = []
-    for col in range(1, 17):  # Adjust range as per your columns
-        source_cell = ws.cell(row=insert_idx, column=col)
-        column_styles.append({
-            'font': copy.copy(source_cell.font),
-            'border': copy.copy(source_cell.border),
-            'fill': copy.copy(source_cell.fill),
-            'number_format': copy.copy(source_cell.number_format),
-            'protection': copy.copy(source_cell.protection),
-            'alignment': copy.copy(source_cell.alignment)
+    # Extract column names from header rows before insert_row
+    col_names = [""] * (ws.max_column + 1)
+    for row in ws.iter_rows(min_row=1, max_row=insert_row, values_only=True):
+        for i, val in enumerate(row):
+            if val and str(val).strip().replace("\n", "") in EXCEL_COLUMNS:
+                col_names[i] = str(val).strip().replace("\n", "")
+
+    # Copy styles of existing first data row for later re-application
+    styles = []
+    for col_idx in range(1, ws.max_column + 1):
+        cell = ws.cell(row=insert_row, column=col_idx)
+        styles.append({
+            "font": copy.copy(cell.font),
+            "border": copy.copy(cell.border),
+            "fill": copy.copy(cell.fill),
+            "number_format": copy.copy(cell.number_format),
+            "protection": copy.copy(cell.protection),
+            "alignment": copy.copy(cell.alignment)
         })
 
-    # Find end_idx
-    end_idx = insert_idx
-    while True:
-        val_b = ws.cell(row=end_idx, column=2).value
-        if not (isinstance(val_b, int) or val_b is None):
+    # Determine end row of existing data by checking STT column for integers or None
+    stt_col_idx = get_col_index(col_names, "STT")
+    if stt_col_idx is None:
+        raise ValueError("Cannot find 'STT' column in Excel sheet.")
+
+    end_row = insert_row
+    max_row = ws.max_row
+    while end_row <= max_row:
+        val = ws.cell(row=end_row, column=stt_col_idx).value
+        if val is not None and not isinstance(val, int):
             break
-        end_idx += 1
-        if end_idx > ws.max_row:
-            break
+        end_row += 1
+    num_rows_to_delete = end_row - insert_row
 
     # Delete existing data rows
-    num_delete = end_idx - insert_idx
-    if num_delete > 0:
-        ws.delete_rows(insert_idx, amount=num_delete)
+    if num_rows_to_delete > 0:
+        ws.delete_rows(insert_row, amount=num_rows_to_delete)
 
-    # Insert new rows
-    num_new_rows = len(all_data)
-    ws.insert_rows(insert_idx, amount=num_new_rows)
+    # Insert new rows for extracted data
+    ws.insert_rows(insert_row, amount=len(all_items))
 
-    # Set values and styles for new rows
-    for i, item in enumerate(all_data):
-        row_idx = insert_idx + i
-        row = ['']
-        for key in range(1, 16):
-            col_name = col_map[key]
-            value = item.get(col_name, '')
-            row.append(value)
-        for j, value in enumerate(row):
-            col = j + 1  # Columns 1 to 16
-            target_cell = get_writable_cell(ws, row_idx, col)
-            style = column_styles[j]
-            target_cell.font = style['font']
-            target_cell.border = style['border']
-            target_cell.fill = style['fill']
-            target_cell.number_format = style['number_format']
-            target_cell.protection = style['protection']
-            target_cell.alignment = style['alignment']
-            target_cell.value = value
+    # Fill new rows with data and apply styles
+    for i, item in enumerate(all_items):
+        row_num = insert_row + i
+        for col_zero_idx in range(ws.max_column):
+            col_name = col_names[col_zero_idx]
+            val = item.get(col_name, "")
+            cell = get_cell_to_write(ws, row_num, col_zero_idx + 1)
+            style = styles[col_zero_idx]
+            cell.font = style["font"]
+            cell.border = style["border"]
+            cell.fill = style["fill"]
+            cell.number_format = style["number_format"]
+            cell.protection = style["protection"]
+            cell.alignment = style["alignment"]
+            cell.value = val
 
-    # Update summary rows
-    row_idx = insert_idx + len(all_data)
-    total_doanh_so = sum(item.get('Doanh số mua chưa có thuế', 0) for item in all_data)
-    total_thue_gtgt = sum(item.get('Thuế GTGT', 0) for item in all_data)
-    # Use get_writable_cell for robustness
-    get_writable_cell(ws, row_idx, 13).value = total_doanh_so
-    get_writable_cell(ws, row_idx, 15).value = total_thue_gtgt
+    # Write totals in summary row (below last data row)
+    summary_row = insert_row + len(all_items)
+    col_amount_idx = get_col_index(col_names, "THÀNH TIỀN NGUYÊN TỆ")
+    col_amount_vnd_idx = get_col_index(col_names, "THÀNHTIỀN(VND)")
+    if not col_amount_idx or not col_amount_vnd_idx:
+        raise ValueError("Missing required columns to write totals.")
 
-    row_idx += 5
-    get_writable_cell(ws, row_idx, 8).value = total_doanh_so
+    total_amount = sum(item.get("THÀNH TIỀN NGUYÊN TỆ", 0) for item in all_items)
+    total_amount_vnd = sum(item.get("THÀNHTIỀN(VND)", 0) for item in all_items)
 
-    row_idx += 1
-    get_writable_cell(ws, row_idx, 8).value = total_thue_gtgt
+    get_cell_to_write(ws, summary_row, col_amount_idx).value = total_amount
+    get_cell_to_write(ws, summary_row, col_amount_vnd_idx).value = total_amount_vnd
 
-    # Save to BytesIO
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-    return output
+    output_stream = BytesIO()
+    wb.save(output_stream)
+    output_stream.seek(0)
+    return output_stream
 
+
+mapping_dict = {}
 def main():
-    st.title("Invoice Data Processor")
-    docx_files = st.file_uploader("Upload DOCX Files", type="docx", accept_multiple_files=True)
-    excel_file = st.file_uploader("Upload Excel File", type="xlsx", accept_multiple_files=False)
+    st.title("PDF Invoice Data Processor")
+    st.write("Upload PDF invoice files and an Excel template to process invoice data.")
 
-    if docx_files and excel_file:
-        if st.button("Process Files"):
-            result_excel = process_files(docx_files, excel_file)
-            st.success("Processing complete!")
-            st.download_button(
-                label="Download Result Excel",
-                data=result_excel,
-                file_name="result.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+    mapping_file = st.file_uploader(
+        "Upload column-mapping TXT",
+        type="txt",
+        help='Format per line: "filename.pdf": 1,2,3,4,5,6'
+    )
+    global mapping_dict
+    if mapping_file:
+        text = mapping_file.getvalue().decode("utf-8")
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            parts = line.split(":")
+            fname = parts[0].strip()
+            indices = [int(s.strip())-1 for s in parts[1].split(",")]
+            mapping_dict[fname] = indices
+
+    pdf_files = st.file_uploader("Upload PDF Files", type="pdf", accept_multiple_files=True)
+    excel_template = st.file_uploader("Upload Excel Template File", type="xlsx", accept_multiple_files=False)
+
+    if pdf_files and excel_template:
+            with st.spinner("Processing PDF files..."):
+                try:
+                    output_excel = update_excel_with_data(pdf_files, excel_template)
+                    st.success("Processing complete!")
+                    st.download_button(
+                        label="Download Result Excel",
+                        data=output_excel,
+                        file_name="result.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                except Exception as error:
+                    st.error(f"Error during processing: {error}")
+
 
 if __name__ == "__main__":
     main()
