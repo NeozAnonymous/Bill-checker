@@ -85,13 +85,16 @@ def extract_seller_info(lines):
         pass
 
     tax_code = ""
-    tax_code_pattern = re.compile(r'((?:\d\s*){10}(?:-\s*(?:\d\s*)+)?)')
+    tax_code_pattern = re.compile(r'(?<!\d)((?:\d\s*){10}(?:-\s*(?:\d\s*)+)?)(?!\d)')
 
     for line in lines:
         match = tax_code_pattern.search(line)
         if match:
             tax_code = match.group(1).replace(" ", "").replace("-", "")
-            break
+            if tax_code=="3700769325":
+                tax_code = ""
+            else:
+                break
 
     return seller_name, tax_code
 
