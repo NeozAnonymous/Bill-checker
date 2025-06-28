@@ -1,3 +1,4 @@
+import string
 import streamlit as st
 import pandas as pd
 import re
@@ -47,27 +48,42 @@ def extract_pdf_text(file):
 
 
 def extract_seller_info(lines):
-    """
-    Extract seller name and tax code from lines.
-    Seller name is the line containing 'CÔNG TY' and tax code is a 10-digit number possibly with dashes/spaces.
-    """
-    def find_seller_line_idx(lines):
-        candidates = []
+
+    def process_seller_name(str_):
+
+        s = str_.split(":")[-1] if ":" in str_ else str_
+        s = str_.split()
+
+        new_str = ""
+
+        for i, w in enumerate(s):
+            if w in string.punctuation or w.isupper():
+                s = s[i:]
+                break
+
+        for w in s:
+            if w in string.punctuation or w.isupper():
+                new_str += f" {w}"
+            else:
+                break
+
+        new_str = new_str.strip(string.punctuation).replace(" MST", "").strip()
+
+        if "CÔNG TY" not in new_str:
+            new_str = "Công ty" + " " + new_str
+
+        return new_str
+
+    seller_name = ""
+    try:
         for i, line in enumerate(lines):
-            if "CÔNG TY" in line:
-                seller = line.split(":", 1)[-1].strip()
-                candidates.append((seller, i))
-        if not candidates:
-            return None
-        # choose longest seller name (likely more complete)
-        seller_name, idx = max(candidates, key=lambda c: len(c[0].split()))
-        return idx
+            biline = lines[i].strip() + " " + lines[i + 1].strip()
+            if ("CÔNG TY" in line or "Công ty" in line) and "MAI KA" not in biline:
+                seller_name = process_seller_name(biline)
+                break
+    except:
+        pass
 
-    start_idx = find_seller_line_idx(lines)
-    if start_idx is None:
-        return "", ""
-
-    seller_name = lines[start_idx].split(":", 1)[-1].strip()
     tax_code = ""
     tax_code_pattern = re.compile(r'((?:\d\s*){10}(?:-\s*(?:\d\s*)+)?)')
 
@@ -105,7 +121,6 @@ def extract_invoice_number(lines):
 
     return number
 
-
 def extract_tables_from_pdf(file):
     """
     Attempt to extract tables from first page of PDF using fitz's find_tables.
@@ -141,6 +156,36 @@ def extract_tables_from_pdf(file):
 
     return extracted_rows
 
+def postprocess_rows(item_table):
+
+    try:
+        start_idx = 2 if len(item_table) > 2 and item_table[2][0].strip()[0]=="1" else 1
+        item_table = item_table[start_idx:]
+
+        end_idx = len(item_table)
+        for i, row in enumerate(item_table):
+            if not row or not row[0] or not row[0].strip()[0].isdigit():
+                end_idx = i
+                break
+
+        item_table = item_table[:end_idx]
+
+        new_item_table = [[] for _ in range(len(item_table[0]))]
+        for row in item_table:
+            n_extract_row= len(row[0].strip().split("\n"))
+            for i, cell in enumerate(row):
+                cells = cell.strip().split("\n")
+                new_item_table[i].extend(cells)
+        new_item_table = [
+            [
+            new_item_table[j][i] for j in range(len(new_item_table))
+            ]
+            for i in range(len(new_item_table[0]))
+        ]
+
+        return new_item_table
+    except Exception as e:
+        return []
 
 def parse_int(value_str):
     """Safely parse integer from string after removing dots, commas, spaces; return None on error."""
@@ -177,16 +222,7 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
     invoice_number = extract_invoice_number(lines)
 
     # Determine starting index for item rows
-    start_idx = 2 if len(item_table) > 1 and str(item_table[1][0]).strip() == "1" else 1
-
-    item_rows = []
-    for row in item_table[start_idx:]:
-        if row and row[0] and str(row[0]).strip().isdigit():
-            cleaned = [str(cell).strip() if cell else '' for cell in row]
-            item_rows.append(cleaned)
-        else:
-            if len(item_rows) > 0:
-                break
+    item_rows = postprocess_rows(item_table)
 
     # Extract invoice date from lines
     date_pattern = re.compile(r'(\d{2}\s*[-/]\s*\d{2}\s*[-/]\s*\d{4})')
@@ -269,7 +305,7 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
         })
 
     if len(extracted_data) == 0:
-        raise ValueError("Cannot find table in the PDF")
+        raise ValueError("Cannot find table in the PDF_")
     return extracted_data
 
 
