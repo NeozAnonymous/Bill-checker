@@ -355,7 +355,7 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
             "SỐ HÓA ĐƠN": invoice_number,
             "NGÀY HÓA ĐƠN": invoice_date,
             "NGÀY CHỨNG TỪ": invoice_date,
-            "Thuế GTGT": tax_amount,
+            "Thuế GTGT": '',
         })
 
     if len(extracted_data) == 0:
@@ -370,8 +370,8 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
             "SỐ LƯỢNG": '',
             "GIÁ": '',
             "TỶ GIÁ": 1,
-            "THÀNH TIỀN NGUYÊN TỆ": sum(v["Thuế GTGT"] for v in extracted_data),
-            "THÀNHTIỀN(VND)": sum(v["Thuế GTGT"]*float(v["TỶ GIÁ"]) for v in extracted_data),
+            "THÀNH TIỀN NGUYÊN TỆ": tax_amount,
+            "THÀNHTIỀN(VND)": tax_amount * 1,
             "Ghi chú": "",
             "Ký hiệu mẫu hóa đơn": "",
             "SỐ HÓA ĐƠN": invoice_number,
