@@ -66,7 +66,7 @@ def extract_pdf_text(file):
     sorted_lines = [line.replace("\xa0", " ") for _, _, line in lines_with_pos]
     return sorted_lines
 
-def find_and_extract(lines, start_pattern="(.*)", pattern="(.*)", ignorance=None, post_processing=None, name=None, early_stopping=True):
+def find_and_extract(lines, start_pattern="(.*)", pattern="(.*)", ignorance=None, post_processing=None, name=None):
 
     if filename=="NGUYENNGOC1C25TNN_00001004.pdf":
         for line in lines:
@@ -102,8 +102,11 @@ def find_and_extract(lines, start_pattern="(.*)", pattern="(.*)", ignorance=None
                             result = result.replace(k, post_processing[k])
                         found = True
                         break
-            if found and early_stopping:
+            if found:
                 break
+
+    if found:
+        return result
 
     if name is None:
         st.warning(f"The values found for file {filename} could be wrong. Please check")
@@ -119,8 +122,7 @@ def find_and_extract(lines, start_pattern="(.*)", pattern="(.*)", ignorance=None
                 result = m
                 for k in post_processing:
                     result = result.replace(k, post_processing[k])
-                if early_stopping:
-                    break
+                break
 
     return result
 
@@ -180,12 +182,15 @@ def extract_other_values(lines):
                               name = "Số hóa đơn",
                               )
 
+
     tax_amount = find_and_extract(lines,
                               r"thuế GTGT|(VAT amount)",
                               r'^(\d{1,3}(?:\.\d{3})*)$|(KCT)',
                               name = "Thuế GTGT",
-                              early_stopping=False
                               )
+
+    if len(tax_amount)<=3 and tax_amount!="0":
+        raise ValueError("Cannot get tax_amount")
 
     return tax_code, number, tax_amount
 
@@ -241,7 +246,7 @@ def postprocess_rows(item_table):
 
         new_item_table = [[] for _ in range(len(item_table[0]))]
         for row in item_table:
-            n_extract_row= len(row[0].strip().split("\n"))
+            n_extract_row = len(row[0].strip().split("\n"))
             for i, cell in enumerate(row):
                 cells = cell.strip().split("\n")
                 new_item_table[i].extend(cells)
