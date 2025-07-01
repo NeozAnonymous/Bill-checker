@@ -68,7 +68,7 @@ def extract_pdf_text(file):
 
 def find_and_extract(lines, start_pattern="(.*)", pattern="(.*)", ignorance=None, post_processing=None, name=None):
 
-    if filename=="NGUYENNGOC1C25TNN_00001004.pdf":
+    if filename=="ANTHANHPHAT61_090625.pdf":
         for line in lines:
             print(line)
 
@@ -248,6 +248,10 @@ def postprocess_rows(item_table):
         new_item_table = [[] for _ in range(len(item_table[0]))]
         for row in item_table:
             n_extract_row = len(row[0].strip().split("\n"))
+            if n_extract_row == 1:
+                for i, cell in enumerate(row):
+                    new_item_table[i].extend([cell.strip()])
+                continue
             for i, cell in enumerate(row):
                 cells = cell.strip().split("\n")
                 new_item_table[i].extend(cells)
