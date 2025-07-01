@@ -66,9 +66,9 @@ def extract_pdf_text(file):
     sorted_lines = [line.replace("\xa0", " ") for _, _, line in lines_with_pos]
     return sorted_lines
 
-def find_and_extract(lines, start_pattern="(.*)", pattern="(.*)", ignorance=None, post_processing=None, name=None):
+def find_and_extract(lines, start_pattern="(.*)", pattern="(.*)", ignorance=None, post_processing=None, name=None, early_stopping=True):
 
-    if filename=="TINVANG3703035442-C25TTV9.pdf":
+    if filename=="NGUYENNGOC1C25TNN_00001004.pdf":
         for line in lines:
             print(line)
 
@@ -93,33 +93,34 @@ def find_and_extract(lines, start_pattern="(.*)", pattern="(.*)", ignorance=None
                     txt = l.strip()
                 match = search_pattern.search(txt)
                 if match:
-                    result = match.group(1)
-                    for k in post_processing:
-                        result = result.replace(k, post_processing[k])
-                    if ignorance and result in ignorance:
-                        result = ""
+                    m = match.group(1)
+                    if ignorance and m in ignorance:
                         break
                     else:
+                        result = m
+                        for k in post_processing:
+                            result = result.replace(k, post_processing[k])
                         found = True
                         break
-            if found:
+            if found and early_stopping:
                 break
 
+    if name is None:
+        st.warning(f"The values found for file {filename} could be wrong. Please check")
+    else:
+        st.warning(f"The value found for {name} for file {filename} could be wrong. Please check")
     if result=="":
         for line in lines:
             match = search_pattern.search(line.strip())
             if match:
-                result = match.group(1)
-                if ignorance and result in ignorance:
-                    result = ""
+                m = match.group(1)
+                if ignorance and m in ignorance:
                     continue
+                result = m
                 for k in post_processing:
                     result = result.replace(k, post_processing[k])
-                if name is None:
-                    st.warning(f"The values found for file {filename} could be wrong. Please check")
-                else:
-                    st.warning(f"The value found for {name} for file {filename} could be wrong. Please check")
-                break
+                if early_stopping:
+                    break
 
     return result
 
@@ -181,8 +182,9 @@ def extract_other_values(lines):
 
     tax_amount = find_and_extract(lines,
                               r"thuế GTGT|(VAT amount)",
-                              r'^(\d{1,3}(?:\.\d{3})*)$',
+                              r'^(\d{1,3}(?:\.\d{3})*)$|(KCT)',
                               name = "Thuế GTGT",
+                              early_stopping=False
                               )
 
     return tax_code, number, tax_amount
