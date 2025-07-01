@@ -35,20 +35,40 @@ def get_cell_to_write(ws, row, col):
     return ws.cell(row=row, column=col)
 
 
+import fitz  # PyMuPDF
+
+
 def extract_pdf_text(file):
-    """Extract non-empty text lines from all pages of a PDF file stream."""
+    """Extract non-empty text lines from all pages of a PDF file stream,
+       sorted in natural reading order by line-center then x."""
     doc = fitz.open(stream=file, filetype="pdf")
-    lines = []
+    lines_with_pos = []
+
     for page_num in range(doc.page_count):
-        page_text = doc.load_page(page_num).get_text("text")
-        page_lines = [line.strip() for line in page_text.splitlines() if line.strip()]
-        lines.extend(page_lines)
+        page = doc.load_page(page_num)
+        blocks = page.get_text("blocks")
+        # blocks: list of (x0, y0, x1, y1, text, block_no, block_type)
+
+        for x0, y0, x1, y1, text, *_ in blocks:
+            center_y = (y0 + y1) / 2
+            for raw_line in text.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                lines_with_pos.append((center_y, x0, line))
+
     doc.close()
-    return lines
 
-def find_and_extract(lines, start_pattern="(.*)", pattern="(.*)", ignorance=None, post_processing=None):
+    # sort by vertical center, then by x (left→right)
+    lines_with_pos.sort(key=lambda item: (item[0], item[1]))
 
-    if filename=="BAOMA1C25TBM_0302724400_1347.pdf":
+    # strip out only the text, replace non‑breaking spaces
+    sorted_lines = [line.replace("\xa0", " ") for _, _, line in lines_with_pos]
+    return sorted_lines
+
+def find_and_extract(lines, start_pattern="(.*)", pattern="(.*)", ignorance=None, post_processing=None, name=None):
+
+    if filename=="TINVANG3703035442-C25TTV9.pdf":
         for line in lines:
             print(line)
 
@@ -85,6 +105,22 @@ def find_and_extract(lines, start_pattern="(.*)", pattern="(.*)", ignorance=None
             if found:
                 break
 
+    if result=="":
+        for line in lines:
+            match = search_pattern.search(line.strip())
+            if match:
+                result = match.group(1)
+                if ignorance and result in ignorance:
+                    result = ""
+                    continue
+                for k in post_processing:
+                    result = result.replace(k, post_processing[k])
+                if name is None:
+                    st.warning(f"The values found for file {filename} could be wrong. Please check")
+                else:
+                    st.warning(f"The value found for {name} for file {filename} could be wrong. Please check")
+                break
+
     return result
 
 def extract_seller_name(lines):
@@ -111,13 +147,11 @@ def extract_seller_name(lines):
 
         return new_str
 
-    print(filename)
     seller_name = ""
     try:
         for i, line in enumerate(lines):
             biline = lines[i].strip() + " " + lines[i + 1].strip()
-            if ("CÔNG TY" in line) and "MAI KA" not in biline:
-                print(biline)
+            if ("CÔNG" in line and "TY" in line) and "MAI KA" not in biline:
                 seller_name = process_seller_name(biline)
                 break
     except:
@@ -134,13 +168,15 @@ def extract_seller_name(lines):
 def extract_other_values(lines):
 
     tax_code = find_and_extract(lines,
-                                r"Mã số thuế|Tax code|MST|Tax Code",
+                                r"Mã số thuế|MST|Tax code|Tax Code",
                                 r'^((?:\d\s*){10}(?:-\s*(?:\d\s*)+)?)$',
-                                "3700769325")
+                                ["3700769325"],
+                                name = "Mã số thuế")
 
     number = find_and_extract(lines,
                               r"Số(?:(?:\s|\([^)]*\))*)?:",
                               r'^(\d+)$',
+                              name = "Số hóa đơn",
                               )
 
     return tax_code, number
@@ -347,7 +383,7 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
             "SỐ HÓA ĐƠN": invoice_number,
             "NGÀY HÓA ĐƠN": invoice_date,
             "NGÀY CHỨNG TỪ": invoice_date,
-            "Thuế GTGT": 0
+            "Thuế GTGT": '',
         })
     return extracted_data
 
