@@ -131,7 +131,6 @@ def extract_seller_name(lines):
     def process_seller_name(str_):
 
         s = str_.split(":")[1] if ":" in str_ else str_
-        s = str_.split()
 
         new_str = ""
 
