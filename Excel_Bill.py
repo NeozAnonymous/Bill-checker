@@ -355,7 +355,6 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
             "SỐ HÓA ĐƠN": invoice_number,
             "NGÀY HÓA ĐƠN": invoice_date,
             "NGÀY CHỨNG TỪ": invoice_date,
-            "Thuế GTGT": '',
         })
 
     if len(extracted_data) == 0:
@@ -377,7 +376,6 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
             "SỐ HÓA ĐƠN": invoice_number,
             "NGÀY HÓA ĐƠN": invoice_date,
             "NGÀY CHỨNG TỪ": invoice_date,
-            "Thuế GTGT": '',
         })
     return extracted_data
 
