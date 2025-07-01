@@ -46,12 +46,52 @@ def extract_pdf_text(file):
     doc.close()
     return lines
 
+def find_and_extract(lines, start_pattern="(.*)", pattern="(.*)", ignorance=None, post_processing=None):
 
-def extract_seller_info(lines):
+    if filename=="BAOMA1C25TBM_0302724400_1347.pdf":
+        for line in lines:
+            print(line)
+
+    if post_processing==None:
+        post_processing={
+            "-" : "",
+            " " : "",
+        }
+
+    start_search = re.compile(start_pattern)
+    search_pattern = re.compile(pattern)
+
+    result = ""
+    found = False
+    for i, line in enumerate(lines):
+        if start_search.search(line):
+            for j, l in enumerate(lines[i:]):
+                parts = l.split(":")
+                if (j==0 or parts[0].strip()=="") and len(parts)>1:
+                    txt = parts[1].strip()
+                else:
+                    txt = l.strip()
+                match = search_pattern.search(txt)
+                if match:
+                    result = match.group(1)
+                    for k in post_processing:
+                        result = result.replace(k, post_processing[k])
+                    if ignorance and result in ignorance:
+                        result = ""
+                        break
+                    else:
+                        found = True
+                        break
+            if found:
+                break
+
+    return result
+
+def extract_seller_name(lines):
 
     def process_seller_name(str_):
 
-        s = str_.split(":")[-1] if ":" in str_ else str_
+        s = str_.split(":")[1] if ":" in str_ else str_
         s = str_.split()
 
         new_str = ""
@@ -69,60 +109,42 @@ def extract_seller_info(lines):
 
         new_str = new_str.strip(string.punctuation).replace(" MST", "").strip()
 
-        if "CÔNG TY" not in new_str:
-            new_str = "Công ty" + " " + new_str
-
         return new_str
 
+    print(filename)
     seller_name = ""
     try:
         for i, line in enumerate(lines):
             biline = lines[i].strip() + " " + lines[i + 1].strip()
-            if ("CÔNG TY" in line or "Công ty" in line) and "MAI KA" not in biline:
+            if ("CÔNG TY" in line) and "MAI KA" not in biline:
+                print(biline)
                 seller_name = process_seller_name(biline)
                 break
     except:
-        pass
+        seller_name = find_and_extract(
+            lines,
+            r"Tên công ty|Company",
+            r"(.*)",
+            post_processing={},
+        )
 
-    tax_code = ""
-    tax_code_pattern = re.compile(r'(?<!\d)((?:\d\s*){10}(?:-\s*(?:\d\s*)+)?)(?!\d)')
-
-    for line in lines:
-        match = tax_code_pattern.search(line)
-        if match:
-            tax_code = match.group(1).replace(" ", "").replace("-", "")
-            if tax_code=="3700769325":
-                tax_code = ""
-            else:
-                break
-
-    return seller_name, tax_code
+    return seller_name
 
 
-def extract_invoice_number(lines):
-    """
-    Extract invoice number by searching lines with 'Số' pattern (case insensitive).
-    This method considers lines after the matched line for numeric-only values.
-    """
-    number = ""
-    for i, line in enumerate(lines):
+def extract_other_values(lines):
 
-        if re.search(r"Số(?:(?:\s|\([^)]*\))*)?:", line, re.IGNORECASE):
-            parts = line.split(":", 1)
-            if len(parts) > 1:
-                value = parts[1].strip()
-                if value.isdigit():
-                    number = value
-                    break
-            # look at following lines if current line does not contain a digit-only number
-            for next_line in lines[i + 1:]:
-                if next_line.strip().isdigit():
-                    number = next_line.strip()
-                    break
-            if number:
-                break
+    tax_code = find_and_extract(lines,
+                                r"Mã số thuế|Tax code|MST|Tax Code",
+                                r'^((?:\d\s*){10}(?:-\s*(?:\d\s*)+)?)$',
+                                "3700769325")
 
-    return number
+    number = find_and_extract(lines,
+                              r"Số(?:(?:\s|\([^)]*\))*)?:",
+                              r'^(\d+)$',
+                              )
+
+    return tax_code, number
+
 
 def extract_tables_from_pdf(file):
     """
@@ -221,11 +243,30 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
     if not item_table or len(item_table) == 0:
         raise ValueError("Cannot find table in the PDF")
 
-    seller_name, tax_code = extract_seller_info(lines)
-    invoice_number = extract_invoice_number(lines)
-
     # Determine starting index for item rows
     item_rows = postprocess_rows(item_table)
+
+    pdf_col_names = item_table[0]
+    pdf_col_names = list(
+        map(
+            lambda x: " ".join(x.split("\n")[:-1]).strip() if len(x.split("\n")) > 1 else x,
+            pdf_col_names
+        )
+    )
+
+    if len(pdf_col_names) > 6:
+
+        cols_map = {}
+        if filename not in mapping_dict.keys():
+            raise ValueError(f"File {filename} requires col_mapping but not found")
+        for i, key in enumerate(["stt", "name", "unit", "qty", "price", "amount"]):
+            cols_map[key] = mapping_dict[filename][i]
+
+    else:
+        cols_map = {"stt": 0, "name": 1, "unit": 2, "qty": 3, "price": 4, "amount": 5}
+
+    seller_name = extract_seller_name(lines)
+    tax_code, invoice_number = extract_other_values(lines)
 
     # Extract invoice date from lines
     date_pattern = re.compile(r'(\d{2}\s*[-/]\s*\d{2}\s*[-/]\s*\d{4})')
@@ -248,26 +289,6 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
     if tax_rate is None:
         st.warning(f"Cannot find tax rate for {pdf_file_stream.name}, set tax_rate to 0")
         tax_rate = 0
-
-
-    pdf_col_names = item_table[0]
-    pdf_col_names = list(
-        map(
-            lambda x: " ".join(x.split("\n")[:-1]).strip() if len(x.split("\n")) > 1 else x,
-            pdf_col_names
-        )
-    )
-
-    if len(pdf_col_names) > 6:
-
-        cols_map = {}
-        if filename not in mapping_dict.keys():
-            raise ValueError(f"File {filename} requires col_mapping but not found")
-        for i, key in enumerate(["stt", "name", "unit", "qty", "price", "amount"]):
-            cols_map[key] = mapping_dict[filename][i]
-
-    else:
-        cols_map = {"stt": 0, "name": 1, "unit": 2, "qty": 3, "price": 4, "amount": 5}
 
     extracted_data = []
     for row in item_rows:
