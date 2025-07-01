@@ -179,7 +179,13 @@ def extract_other_values(lines):
                               name = "Số hóa đơn",
                               )
 
-    return tax_code, number
+    tax_amount = find_and_extract(lines,
+                              r"thuế GTGT|(VAT amount)",
+                              r'^(\d{1,3}(?:\.\d{3})*)$',
+                              name = "Thuế GTGT",
+                              )
+
+    return tax_code, number, tax_amount
 
 
 def extract_tables_from_pdf(file):
@@ -302,7 +308,7 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
         cols_map = {"stt": 0, "name": 1, "unit": 2, "qty": 3, "price": 4, "amount": 5}
 
     seller_name = extract_seller_name(lines)
-    tax_code, invoice_number = extract_other_values(lines)
+    tax_code, invoice_number, tax_amount = extract_other_values(lines)
 
     # Extract invoice date from lines
     date_pattern = re.compile(r'(\d{2}\s*[-/]\s*\d{2}\s*[-/]\s*\d{4})')
@@ -313,19 +319,7 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
             invoice_date = match.group(1).replace(" ", "").replace("-", "/")
             break
 
-    # Extract tax rate (e.g. '10%') from lines
-    tax_rate_pattern = re.compile(r"(?<!\d)(\d{1,3})\s*%(?!\d)")
-    tax_rate = None
-    for line in lines:
-        match = tax_rate_pattern.search(line)
-        if match:
-            tax_rate = float(match.group(1)) / 100
-            break
-
-    if tax_rate is None:
-        st.warning(f"Cannot find tax rate for {pdf_file_stream.name}, set tax_rate to 0")
-        tax_rate = 0
-
+    tax_amount = parse_int(tax_amount)
     extracted_data = []
     for row in item_rows:
         # use the mapped indices instead of fixed positions
@@ -361,7 +355,7 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
             "SỐ HÓA ĐƠN": invoice_number,
             "NGÀY HÓA ĐƠN": invoice_date,
             "NGÀY CHỨNG TỪ": invoice_date,
-            "Thuế GTGT": amount * tax_rate
+            "Thuế GTGT": tax_amount,
         })
 
     if len(extracted_data) == 0:
