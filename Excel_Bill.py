@@ -330,6 +330,25 @@ def extract_invoice_data_from_pdf(pdf_file_stream):
 
     if len(extracted_data) == 0:
         raise ValueError("Cannot find table in the PDF_")
+    else:
+        extracted_data.append({
+            "STT": 0,
+            "TÊN": seller_name,
+            "Mã số thuế người bán": tax_code,
+            "TÊN MẶT HÀNG": "THUẾ GTGT",
+            "ĐƠN VỊ": '',
+            "SỐ LƯỢNG": '',
+            "GIÁ": '',
+            "TỶ GIÁ": 1,
+            "THÀNH TIỀN NGUYÊN TỆ": sum(v["Thuế GTGT"] for v in extracted_data),
+            "THÀNHTIỀN(VND)": sum(v["Thuế GTGT"]*v["TỶ GIÁ"] for v in extracted_data),
+            "Ghi chú": "",
+            "Ký hiệu mẫu hóa đơn": "",
+            "SỐ HÓA ĐƠN": invoice_number,
+            "NGÀY HÓA ĐƠN": invoice_date,
+            "NGÀY CHỨNG TỪ": invoice_date,
+            "Thuế GTGT": 0
+        })
     return extracted_data
 
 
