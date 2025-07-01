@@ -131,7 +131,6 @@ def extract_seller_name(lines):
     def process_seller_name(str_):
 
         #s = str_.split(":")[1] if ":" in str_ else str_
-        str_ = str_.remove(":", "").strip()
         s = str_.split()
 
         new_str = ""
@@ -163,6 +162,7 @@ def extract_seller_name(lines):
             lines,
             r"Tên công ty|Company",
             r"(.*)",
+            name = "Tên công ty",
             post_processing={},
         )
 
