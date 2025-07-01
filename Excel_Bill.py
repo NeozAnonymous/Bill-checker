@@ -146,7 +146,7 @@ def extract_seller_name(lines):
             else:
                 break
 
-        new_str = new_str.strip(string.punctuation).replace(" MST", "").strip()
+        new_str = new_str.strip(string.punctuation).replace(" MST", "").replace(":", "").strip()
 
         return new_str
 
