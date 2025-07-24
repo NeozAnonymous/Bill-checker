@@ -59,8 +59,10 @@ def extract_invoice_info(tree):
         })
 
     total = root.find('.//TToan')
-    total = total.find('.//THTTLTSuat')
-    total_vat = parse_num(total.findtext('TgTThue'))
+    try:
+        total_vat = parse_num(total.findtext('TgTThue'))
+    except:
+        raise ValueError("Nigga")
 
     return {
         'header': {
