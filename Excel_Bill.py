@@ -58,8 +58,8 @@ def extract_invoice_info(tree):
             'tax_amount': tax_amount
         })
 
-    total = root.find('.//LTSuat')
-    total_vat = parse_num(total.findtext('TThue'))
+    total = root.find('.//THTTLTSuat')
+    total_vat = parse_num(total.findtext('TgTThue'))
 
     return {
         'header': {
