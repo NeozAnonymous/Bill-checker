@@ -66,10 +66,9 @@ def extract_invoice_info(tree):
 
     else :
         if buyer["name"] != "CÔNG TY TNHH MAI KA":
-            st.warning(f"{filename} has name mismatched, expected : CÔNG TY TNHH MAI KA, found : {buyer["name"]}")
+            st.warning(f"{filename} has name mismatched, expected : CÔNG TY TNHH MAI KA")
         if buyer["tax_code"] != "3700769325":
-            st.warning(f"{filename} has tax code mismatched, expected : 3700769325, found : {buyer["tax_code"]}")
-
+            st.warning(f"{filename} has tax code mismatched, expected : 3700769325")
 
     # Line items
     items = []
