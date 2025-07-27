@@ -10,6 +10,8 @@ def parse_num(x):
     except:
         return float(x)
 
+flag = False
+warn = False
 def extract_invoice_info(tree):
     """
     Parse a Vietnamese VAT invoice XML ElementTree and extract key information.
@@ -40,6 +42,19 @@ def extract_invoice_info(tree):
         'tax_code': buyer_el.findtext('MST'),
         'address': buyer_el.findtext('DChi')
     }
+
+    global flag
+    global warn
+    if seller["name"]=="CÔNG TY TNHH MAI KA" or seller["tax_code"]=="3700769325":
+        flag = True
+
+        tmp = seller
+        seller = buyer
+        buyer = tmp
+
+    elif flag==True and warn==False:
+        st.warning("In the XML files, CÔNG TY TNHH MAI KA appears as both the seller and the buyer.")
+        warn = True
 
     global filename
     if buyer["name"]!="CÔNG TY TNHH MAI KA":
@@ -157,6 +172,14 @@ if uploaded_files:
     # Create DataFrame with all rows
     df_export = pd.DataFrame(all_rows)
     df_export["STT"] = list(range(1, len(df_export) - 1)) + ["", ""]
+
+    if flag:
+        df_export = df_export.rename(
+            columns = {
+                "TÊN NGƯỜI BÁN" : "TÊN NGƯỜI MUA",
+                "MÃ SỐ THUẾ NGƯỜI BÁN" : "MÃ SỐ THUẾ NGƯỜI MUA",
+            }
+        )
 
     # Show preview
     st.subheader("Preview of Excel Format for All Invoices")
