@@ -41,6 +41,12 @@ def extract_invoice_info(tree):
         'address': buyer_el.findtext('DChi')
     }
 
+
+    if buyer["name"]!="CÔNG TY TNHH MAI KA":
+        st.warning(f"Name mismatched, expected : CÔNG TY TNHH MAI KA, found : {buyer["name"]}")
+    if buyer["tax_code"]!="3700769325":
+        st.warning(f"Tax code mismatched, expected : 3700769325, found : {buyer["tax_code"]}")
+
     # Line items
     items = []
     for line in root.findall('.//DSHHDVu/HHDVu'):
