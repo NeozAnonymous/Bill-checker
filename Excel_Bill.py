@@ -10,8 +10,8 @@ def parse_num(x):
     except:
         return float(x)
 
-flag = False
-warn = False
+cnt1 = 0
+cnt2 = 0
 def extract_invoice_info(tree):
     """
     Parse a Vietnamese VAT invoice XML ElementTree and extract key information.
@@ -43,24 +43,33 @@ def extract_invoice_info(tree):
         'address': buyer_el.findtext('DChi')
     }
 
-    global flag
-    global warn
+    global filename
+    global cnt1, cnt2
+
     if seller["name"]=="CÔNG TY TNHH MAI KA" or seller["tax_code"]=="3700769325":
-        flag = True
+
+        cnt1+=1
 
         tmp = seller
         seller = buyer
         buyer = tmp
 
-    elif flag==True and warn==False:
-        st.warning("In the XML files, CÔNG TY TNHH MAI KA appears as both the seller and the buyer.")
-        warn = True
+        if cnt1 == 1 and cnt2>0:
+            st.warning("In the XML files, CÔNG TY TNHH MAI KA appears as both the seller and the buyer.")
 
-    global filename
-    if buyer["name"]!="CÔNG TY TNHH MAI KA":
-        st.warning(f"{filename} has name mismatched, expected : CÔNG TY TNHH MAI KA, found : {buyer["name"]}")
-    if buyer["tax_code"]!="3700769325":
-        st.warning(f"{filename} has tax code mismatched, expected : 3700769325, found : {buyer["tax_code"]}")
+    elif buyer["name"]=="CÔNG TY TNHH MAI KA" or buyer["tax_code"]=="3700769325":
+
+        cnt2+=1
+
+        if cnt2 == 1 and cnt1>0:
+            st.warning("In the XML files, CÔNG TY TNHH MAI KA appears as both the seller and the buyer.")
+
+    else :
+        if buyer["name"] != "CÔNG TY TNHH MAI KA":
+            st.warning(f"{filename} has name mismatched, expected : CÔNG TY TNHH MAI KA, found : {buyer["name"]}")
+        if buyer["tax_code"] != "3700769325":
+            st.warning(f"{filename} has tax code mismatched, expected : 3700769325, found : {buyer["tax_code"]}")
+
 
     # Line items
     items = []
@@ -173,7 +182,7 @@ if uploaded_files:
     df_export = pd.DataFrame(all_rows)
     df_export["STT"] = list(range(1, len(df_export) - 1)) + ["", ""]
 
-    if flag:
+    if cnt1>0:
         df_export = df_export.rename(
             columns = {
                 "TÊN NGƯỜI BÁN" : "TÊN NGƯỜI MUA",
