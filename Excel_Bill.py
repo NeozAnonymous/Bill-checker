@@ -41,11 +41,11 @@ def extract_invoice_info(tree):
         'address': buyer_el.findtext('DChi')
     }
 
-
+    global filename
     if buyer["name"]!="CÔNG TY TNHH MAI KA":
-        st.warning(f"Name mismatched, expected : CÔNG TY TNHH MAI KA, found : {buyer["name"]}")
+        st.warning(f"{filename} has name mismatched, expected : CÔNG TY TNHH MAI KA, found : {buyer["name"]}")
     if buyer["tax_code"]!="3700769325":
-        st.warning(f"Tax code mismatched, expected : 3700769325, found : {buyer["tax_code"]}")
+        st.warning(f"{filename} has tax code mismatched, expected : 3700769325, found : {buyer["tax_code"]}")
 
     # Line items
     items = []
@@ -95,6 +95,8 @@ if uploaded_files:
 
     for uploaded_file in uploaded_files:
         try:
+            filename = uploaded_file.name
+
             tree = ET.parse(uploaded_file)
             info = extract_invoice_info(tree)
 
