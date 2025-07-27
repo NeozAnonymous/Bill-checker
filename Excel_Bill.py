@@ -42,7 +42,7 @@ def extract_invoice_info(tree):
     }
 
     global filename
-    if buyer["name"]!="CÔNG TY TNHH MAI KA":
+    if buyer["name"]!="CÔNG TY TNHH MAI KAz":
         st.warning(f"{filename} has name mismatched, expected : CÔNG TY TNHH MAI KA, found : {buyer["name"]}")
     if buyer["tax_code"]!="3700769325":
         st.warning(f"{filename} has tax code mismatched, expected : 3700769325, found : {buyer["tax_code"]}")
