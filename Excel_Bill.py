@@ -2,6 +2,7 @@ import streamlit as st
 import xml.etree.ElementTree as ET
 import pandas as pd
 import io
+import re
 
 
 def parse_num(x):
@@ -32,13 +33,13 @@ def extract_invoice_info(tree):
     seller_el = root.find('.//NBan')
     seller = {
         'name': seller_el.findtext('Ten'),
-        'tax_code': seller_el.findtext('MST').replace("-", "").replace(" ", ""),
+        'tax_code': re.sub(r'[^0-9]', '', seller_el.findtext('MST')),
         'address': seller_el.findtext('DChi')
     }
     buyer_el = root.find('.//NMua')
     buyer = {
         'name': buyer_el.findtext('Ten'),
-        'tax_code': buyer_el.findtext('MST').replace("-", "").replace(" ", ""),
+        'tax_code': re.sub(r'[^0-9]', '', buyer_el.findtext('MST')),
         'address': buyer_el.findtext('DChi')
     }
 
