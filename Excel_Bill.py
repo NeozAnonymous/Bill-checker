@@ -18,10 +18,11 @@ def extract_invoice_info(tree):
     Returns a dict with header, parties, line items, and totals.
     """
     root = tree.getroot()
+    root = root.find('.//DLHDon')
 
     # Header
 
-    hdon = root.find('.//DLHDon')
+    #hdon = root.find('.//DLHDon')
     chung = hdon.find('.//TTChung')
     invoice_series = chung.findtext('KHHDon')
     invoice_number = chung.findtext('SHDon')
