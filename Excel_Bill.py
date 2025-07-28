@@ -23,7 +23,7 @@ def extract_invoice_info(tree):
     # Header
 
     #hdon = root.find('.//DLHDon')
-    chung = hdon.find('.//TTChung')
+    chung = root.find('.//TTChung')
     invoice_series = chung.findtext('KHHDon')
     invoice_number = chung.findtext('SHDon')
     invoice_date = chung.findtext('NLap').split("-")
