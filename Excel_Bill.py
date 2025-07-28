@@ -32,13 +32,13 @@ def extract_invoice_info(tree):
     seller_el = root.find('.//NBan')
     seller = {
         'name': seller_el.findtext('Ten'),
-        'tax_code': seller_el.findtext('MST'),
+        'tax_code': seller_el.findtext('MST').replace("-", "").replace(" ", ""),
         'address': seller_el.findtext('DChi')
     }
     buyer_el = root.find('.//NMua')
     buyer = {
         'name': buyer_el.findtext('Ten'),
-        'tax_code': buyer_el.findtext('MST'),
+        'tax_code': buyer_el.findtext('MST').replace("-", "").replace(" ", ""),
         'address': buyer_el.findtext('DChi')
     }
 
