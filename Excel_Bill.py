@@ -77,18 +77,25 @@ def extract_invoice_info(tree):
         for tt in line.findall('TTKhac/TTin'):
             if tt.findtext('TTruong') == 'VATAmount':
                 tax_amount = float(tt.findtext('DLieu') or 0)
-        items.append({
-            'description': line.findtext('THHDVu'),
-            'quantity': parse_num(line.findtext('SLuong') or 0),
-            'unit': line.findtext('DVTinh'),
-            'unit_price': parse_num(line.findtext('DGia') or 0),
-            'line_total': parse_num(line.findtext('ThTien') or 0),
-            'tax_rate': line.findtext('TSuat'),
-            'tax_amount': tax_amount
-        })
+        try:
+            items.append({
+                'description': line.findtext('THHDVu'),
+                'quantity': parse_num(line.findtext('SLuong')) or "",
+                'unit': line.findtext('DVTinh') or "",
+                'unit_price': parse_num(line.findtext('DGia')) or "",
+                'line_total': parse_num(line.findtext('ThTien') or ""),
+                'tax_rate': line.findtext('TSuat'),
+                'tax_amount': tax_amount
+            })
+        except:
+            pass
 
-    total = root.find('.//TToan')
-    total_vat = parse_num(total.findtext('TgTThue'))
+    try:
+        total = root.find('.//TToan')
+        total_vat = parse_num(total.findtext('TgTThue'))
+    except:
+        total = root.findall('.//DSHHDVu/HHDVu')[-1]
+        total_vat = parse_num(total.findtext('ThTien')) if "%" in total.findtext('THHDVu') else 0
 
     return {
         'header': {
