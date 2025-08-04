@@ -130,6 +130,8 @@ if uploaded_files:
             tree = ET.parse(uploaded_file)
             info = extract_invoice_info(tree)
 
+            st.warning(len(info["items"]))
+
             # Build rows for this invoice
             for idx, item in enumerate(info['items'], start=1):
                 total_line = item['line_total'] + item['tax_amount']
@@ -215,3 +217,4 @@ if uploaded_files:
     )
 else:
     st.info("Please upload at least one XML invoice to convert to Excel.")
+
