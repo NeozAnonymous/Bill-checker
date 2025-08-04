@@ -6,6 +6,10 @@ import re
 
 
 def parse_num(x):
+
+    if x==None:
+        return None
+    
     try:
         return int(x)
     except:
@@ -223,6 +227,7 @@ if uploaded_files:
     )
 else:
     st.info("Please upload at least one XML invoice to convert to Excel.")
+
 
 
 
