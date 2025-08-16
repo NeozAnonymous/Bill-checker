@@ -91,11 +91,10 @@ def extract_invoice_info(tree):
                 'tax_rate': line.findtext('TSuat'),
                 'tax_amount': tax_amount
         })
-
-    try:
-        total = root.find('.//TToan')
-        total_vat = parse_num(total.findtext('TgTThue'))
-    except:
+        
+    total = root.find('.//TToan')
+    total_vat = parse_num(total.findtext('TgTThue'))
+    if total_vat==None:
         total = root.findall('.//DSHHDVu/HHDVu')[-1]
         total_vat = parse_num(total.findtext('ThTien')) if "%" in total.findtext('THHDVu') else 0
 
@@ -217,6 +216,7 @@ if uploaded_files:
     )
 else:
     st.info("Please upload at least one XML invoice to convert to Excel.")
+
 
 
 
