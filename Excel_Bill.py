@@ -6,17 +6,19 @@ import re
 
 
 def parse_num(x):
-
-    if x==None:
+    if x == None:
         return None
-    
+
     try:
         return int(x)
     except:
         return float(x)
 
+
 cnt1 = 0
 cnt2 = 0
+
+
 def extract_invoice_info(tree):
     """
     Parse a Vietnamese VAT invoice XML ElementTree and extract key information.
@@ -50,25 +52,25 @@ def extract_invoice_info(tree):
     global filename
     global cnt1, cnt2
 
-    if seller["name"]=="CÔNG TY TNHH MAI KA" or seller["tax_code"]=="3700769325":
+    if seller["name"] == "CÔNG TY TNHH MAI KA" or seller["tax_code"] == "3700769325":
 
-        cnt1+=1
+        cnt1 += 1
 
         tmp = seller
         seller = buyer
         buyer = tmp
 
-        if cnt1 == 1 and cnt2>0:
+        if cnt1 == 1 and cnt2 > 0:
             st.warning("In the XML files, CÔNG TY TNHH MAI KA appears as both the seller and the buyer.")
 
-    elif buyer["name"]=="CÔNG TY TNHH MAI KA" or buyer["tax_code"]=="3700769325":
+    elif buyer["name"] == "CÔNG TY TNHH MAI KA" or buyer["tax_code"] == "3700769325":
 
-        cnt2+=1
+        cnt2 += 1
 
-        if cnt2 == 1 and cnt1>0:
+        if cnt2 == 1 and cnt1 > 0:
             st.warning("In the XML files, CÔNG TY TNHH MAI KA appears as both the seller and the buyer.")
 
-    else :
+    else:
         if buyer["name"] != "CÔNG TY TNHH MAI KA":
             st.warning(f"{filename} has name mismatched, expected : CÔNG TY TNHH MAI KA")
         if buyer["tax_code"] != "3700769325":
@@ -77,24 +79,19 @@ def extract_invoice_info(tree):
     # Line items
     items = []
     for line in root.findall('.//DSHHDVu/HHDVu'):
-        tax_amount = 0.0
-        for tt in line.findall('TTKhac/TTin'):
-            if tt.findtext('TTruong') == 'VATAmount':
-                tax_amount = float(tt.findtext('DLieu') or 0)
-        
+
         items.append({
-                'description': line.findtext('THHDVu'),
-                'quantity': parse_num(line.findtext('SLuong')) or "",
-                'unit': line.findtext('DVTinh') or "",
-                'unit_price': parse_num(line.findtext('DGia')) or "",
-                'line_total': parse_num(line.findtext('ThTien') or ""),
-                'tax_rate': line.findtext('TSuat'),
-                'tax_amount': tax_amount
+            'description': line.findtext('THHDVu'),
+            'quantity': parse_num(line.findtext('SLuong')) or "",
+            'unit': line.findtext('DVTinh') or "",
+            'unit_price': parse_num(line.findtext('DGia')) or "",
+            'line_total': parse_num(line.findtext('ThTien') or ""),
+            'tax_rate': line.findtext('TSuat'),
         })
-        
+
     total = root.find('.//TToan')
     total_vat = parse_num(total.findtext('TgTThue'))
-    if total_vat==None:
+    if total_vat == None:
         total = root.findall('.//DSHHDVu/HHDVu')[-1]
         total_vat = parse_num(total.findtext('ThTien')) if "%" in total.findtext('THHDVu') else 0
 
@@ -133,7 +130,7 @@ if uploaded_files:
 
             # Build rows for this invoice
             for idx, item in enumerate(info['items'], start=1):
-                total_line = item['line_total'] + item['tax_amount']
+                total_line = item['line_total']
                 all_rows.append({
                     'STT': idx,
                     'NGÀY CHỨNG TỪ': info['header']['date'],
@@ -154,7 +151,7 @@ if uploaded_files:
                     'MÃ SỐ THUẾ NGƯỜI BÁN': info['seller']['tax_code'],
                 })
             all_rows.append({
-                'STT': idx+1,
+                'STT': idx + 1,
                 'NGÀY CHỨNG TỪ': info['header']['date'],
                 'SỐ CHỨNG TỪ': "",
                 'NGÀY HÓA ĐƠN': info['header']['date'],
@@ -178,7 +175,7 @@ if uploaded_files:
     total_1 = sum([x["THÀNH TIỀN NGUYÊN TỆ"] for x in all_rows])
     total_2 = sum([x["THÀNHTIỀN(VND)"] for x in all_rows])
 
-    all_rows.append({k:"" for k in all_rows[0].keys()})
+    all_rows.append({k: "" for k in all_rows[0].keys()})
 
     d = {k: "" for k in all_rows[0].keys()}
     d["THÀNH TIỀN NGUYÊN TỆ"] = total_1
@@ -189,11 +186,11 @@ if uploaded_files:
     df_export = pd.DataFrame(all_rows)
     df_export["STT"] = list(range(1, len(df_export) - 1)) + ["", ""]
 
-    if cnt1>0:
+    if cnt1 > 0:
         df_export = df_export.rename(
-            columns = {
-                "TÊN NGƯỜI BÁN" : "TÊN NGƯỜI MUA",
-                "MÃ SỐ THUẾ NGƯỜI BÁN" : "MÃ SỐ THUẾ NGƯỜI MUA",
+            columns={
+                "TÊN NGƯỜI BÁN": "TÊN NGƯỜI MUA",
+                "MÃ SỐ THUẾ NGƯỜI BÁN": "MÃ SỐ THUẾ NGƯỜI MUA",
             }
         )
 
