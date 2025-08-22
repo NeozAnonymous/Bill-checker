@@ -80,14 +80,20 @@ def extract_invoice_info(tree):
     items = []
     for line in root.findall('.//DSHHDVu/HHDVu'):
 
-        items.append({
-            'description': line.findtext('THHDVu'),
-            'quantity': parse_num(line.findtext('SLuong')) or "",
-            'unit': line.findtext('DVTinh') or "",
-            'unit_price': parse_num(line.findtext('DGia')) or "",
-            'line_total': parse_num(line.findtext('ThTien') or ""),
-            'tax_rate': line.findtext('TSuat'),
-        })
+        try:
+
+            items.append({
+                'description': line.findtext('THHDVu'),
+                'quantity': parse_num(line.findtext('SLuong')) or "",
+                'unit': line.findtext('DVTinh') or "",
+                'unit_price': parse_num(line.findtext('DGia')) or "",
+                'line_total': parse_num(line.findtext('ThTien') or ""),
+                'tax_rate': line.findtext('TSuat'),
+            })
+
+        except:
+            
+            pass
 
     total = root.find('.//TToan')
     total_vat = parse_num(total.findtext('TgTThue'))
@@ -213,3 +219,4 @@ if uploaded_files:
     )
 else:
     st.info("Please upload at least one XML invoice to convert to Excel.")
+
